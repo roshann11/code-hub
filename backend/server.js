@@ -103,6 +103,36 @@ io.on('connection', (socket) => {
 
     console.log(`Room ${roomId} now has ${room.users.size} user(s)`);
   });
+
+    socket.on('code-change', ({ roomId, code }) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      room.code = code;
+      // Broadcast to all other users in the room (not sender)
+      socket.to(roomId).emit('code-update', { code });
+      console.log(`📝 Code updated in room ${roomId}`);
+    }
+  });
+
+  // LANGUAGE CHANGE EVENT
+  socket.on('language-change', ({ roomId, language }) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      room.language = language;
+      // Broadcast to all users in the room (including sender)
+      io.to(roomId).emit('language-update', { language });
+      console.log(`🔤 Language changed to ${language} in room ${roomId}`);
+    }
+  });
+
+  // CURSOR POSITION EVENT (optional - for showing where others are typing)
+  socket.on('cursor-position', ({ roomId, position, username }) => {
+    socket.to(roomId).emit('cursor-update', { 
+      socketId: socket.id,
+      position, 
+      username 
+    });
+  });
   
   // DISCONNECT EVENT
   socket.on('disconnect', () => {
