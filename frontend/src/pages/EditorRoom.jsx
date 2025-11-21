@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Monitor, Users, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Monitor, Users, Copy, Check, Download, Play } from 'lucide-react';
 import { io } from 'socket.io-client';
+import CodeEditor from '../components/editor/CodeEditor';
+import LanguageSelector from '../components/editor/LanguageSelector';
 
 const SOCKET_URL = 'http://localhost:3001';
 
@@ -9,6 +11,11 @@ function EditorRoom({ roomId, username }) {
   const [users, setUsers] = useState([]);
   const [copied, setCopied] = useState(false);
   const [connected, setConnected] = useState(false);
+  
+  // Editor state
+  const [code, setCode] = useState('// Loading...');
+  const [language, setLanguage] = useState('javascript');
+  const isRemoteChange = useRef(false);
 
   useEffect(() => {
     // Create socket connection
@@ -19,7 +26,6 @@ function EditorRoom({ roomId, username }) {
     newSocket.on('connect', () => {
       console.log('Connected to server');
       setConnected(true);
-      // Join the room
       newSocket.emit('join-room', { roomId, username });
     });
 
@@ -29,8 +35,10 @@ function EditorRoom({ roomId, username }) {
     });
 
     // Room events
-    newSocket.on('room-state', ({ users: roomUsers }) => {
-      console.log('Received room state:', roomUsers);
+    newSocket.on('room-state', ({ code: roomCode, language: roomLanguage, users: roomUsers }) => {
+      console.log('Received room state');
+      setCode(roomCode);
+      setLanguage(roomLanguage);
       setUsers(roomUsers);
     });
 
@@ -44,16 +52,80 @@ function EditorRoom({ roomId, username }) {
       setUsers(updatedUsers);
     });
 
+    // Code editor events
+    newSocket.on('code-update', ({ code: newCode }) => {
+      console.log('Received code update');
+      isRemoteChange.current = true;
+      setCode(newCode);
+    });
+
+    newSocket.on('language-update', ({ language: newLanguage }) => {
+      console.log('Language updated to:', newLanguage);
+      setLanguage(newLanguage);
+    });
+
     // Cleanup
     return () => {
       newSocket.close();
     };
   }, [roomId, username]);
 
+  const handleCodeChange = (newCode) => {
+    // If this is a remote change, don't emit it back
+    if (isRemoteChange.current) {
+      isRemoteChange.current = false;
+      return;
+    }
+
+    setCode(newCode);
+    if (socket && socket.connected) {
+      socket.emit('code-change', { roomId, code: newCode });
+    }
+  };
+
+  const handleLanguageChange = (newLanguage) => {
+    setLanguage(newLanguage);
+    if (socket && socket.connected) {
+      socket.emit('language-change', { roomId, language: newLanguage });
+    }
+  };
+
   const copyRoomId = () => {
     navigator.clipboard.writeText(roomId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadCode = () => {
+    const extensions = {
+      javascript: 'js',
+      typescript: 'ts',
+      python: 'py',
+      java: 'java',
+      cpp: 'cpp',
+      c: 'c',
+      csharp: 'cs',
+      go: 'go',
+      rust: 'rs',
+      php: 'php',
+      ruby: 'rb',
+      html: 'html',
+      css: 'css',
+      json: 'json',
+      markdown: 'md',
+      sql: 'sql',
+    };
+
+    const extension = extensions[language] || 'txt';
+    const blob = new Blob([code], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `code-${roomId}.${extension}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   };
 
   return (
@@ -87,13 +159,29 @@ function EditorRoom({ roomId, username }) {
           </div>
         </div>
 
-        {/* Right side - Connection status & Users */}
-        <div className="flex items-center gap-4">
+        {/* Right side - Controls & Status */}
+        <div className="flex items-center gap-3">
           
+          {/* Language Selector */}
+          <LanguageSelector 
+            language={language}
+            onLanguageChange={handleLanguageChange}
+          />
+
+          {/* Download Code */}
+          <button
+            onClick={downloadCode}
+            className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-white text-sm"
+            title="Download code"
+          >
+            <Download className="w-4 h-4" />
+            <span className="hidden md:inline">Download</span>
+          </button>
+
           {/* Connection indicator */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded-lg">
             <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-300">
               {connected ? 'Connected' : 'Connecting...'}
             </span>
           </div>
@@ -102,61 +190,63 @@ function EditorRoom({ roomId, username }) {
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded-lg">
             <Users className="w-4 h-4 text-purple-400" />
             <span className="text-sm text-white font-medium">
-              {users.length} online
+              {users.length}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex items-center justify-center bg-slate-900">
-        <div className="text-center space-y-6">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-purple-500/20 rounded-full">
-            <Users className="w-10 h-10 text-purple-400" />
+      {/* Main Content - Editor + Sidebar */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* Code Editor */}
+        <div className="flex-1">
+          <CodeEditor 
+            code={code}
+            language={language}
+            onChange={handleCodeChange}
+          />
+        </div>
+
+        {/* Users Sidebar */}
+        <div className="w-64 bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto">
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <Users className="w-5 h-5 text-purple-400" />
+            Active Users ({users.length})
+          </h3>
+          <div className="space-y-2">
+            {users.map((user) => (
+              <div 
+                key={user.socketId}
+                className="flex items-center gap-3 p-2 bg-slate-700/50 rounded-lg"
+              >
+                <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
+                  <span className="text-purple-400 font-semibold text-sm">
+                    {user.username.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-white text-sm block truncate">
+                    {user.username}
+                  </span>
+                  {user.username === username && (
+                    <span className="text-xs text-purple-400">(You)</span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-          
-          <div>
-            <h2 className="text-2xl font-bold text-white mb-2">
-              Welcome, {username}!
-            </h2>
-            <p className="text-slate-400">
-              You're in room <span className="text-purple-400 font-mono">{roomId}</span>
+
+          {/* Room Info */}
+          <div className="mt-6 p-3 bg-slate-700/30 rounded-lg border border-slate-700">
+            <p className="text-xs text-slate-400 mb-2">Room Code</p>
+            <code className="text-purple-400 font-mono text-sm font-semibold">
+              {roomId}
+            </code>
+            <p className="text-xs text-slate-500 mt-2">
+              Share this code with others to collaborate
             </p>
           </div>
-
-          {/* Users List */}
-          <div className="bg-slate-800 rounded-lg p-6 min-w-[300px] border border-slate-700">
-            <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-              <Users className="w-5 h-5 text-purple-400" />
-              Active Users ({users.length})
-            </h3>
-            <div className="space-y-2">
-              {users.length === 0 ? (
-                <p className="text-slate-500 text-sm">No users yet...</p>
-              ) : (
-                users.map((user) => (
-                  <div 
-                    key={user.socketId}
-                    className="flex items-center gap-3 p-2 bg-slate-700/50 rounded"
-                  >
-                    <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
-                      <span className="text-purple-400 font-semibold text-sm">
-                        {user.username.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <span className="text-white text-sm">{user.username}</span>
-                    {user.username === username && (
-                      <span className="text-xs text-purple-400 ml-auto">(You)</span>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <p className="text-slate-500 text-sm">
-            Code editor coming in next module! 🚀
-          </p>
         </div>
       </div>
     </div>
