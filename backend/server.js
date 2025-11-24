@@ -125,6 +125,26 @@ io.on('connection', (socket) => {
     }
   });
 
+// CHAT MESSAGE EVENT
+socket.on('chat-message', ({ roomId, message, username }) => {
+  const room = rooms.get(roomId);
+  if (room) {
+    const chatMessage = {
+      id: Date.now(),
+      username,
+      message,
+      timestamp: new Date()
+    };
+    
+    room.chatHistory.push(chatMessage);
+    
+    // Send to all users in the room (including sender)
+    io.to(roomId).emit('new-message', chatMessage);
+    
+    console.log(` Message in ${roomId} from ${username}`);
+  }
+});
+
   // CURSOR POSITION EVENT (optional - for showing where others are typing)
   socket.on('cursor-position', ({ roomId, position, username }) => {
     socket.to(roomId).emit('cursor-update', { 
