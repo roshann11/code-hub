@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Copy, Check, Download, Play } from 'lucide-react';
+import { Monitor, Users, Copy, Check, Download, MessageSquare, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import CodeEditor from '../components/editor/CodeEditor';
 import LanguageSelector from '../components/editor/LanguageSelector';
+import ChatBox from '../components/chat/Chatbox';
 
 const SOCKET_URL = 'http://localhost:3001';
 
@@ -16,6 +17,9 @@ function EditorRoom({ roomId, username }) {
   const [code, setCode] = useState('// Loading...');
   const [language, setLanguage] = useState('javascript');
   const isRemoteChange = useRef(false);
+
+  // UI state
+  const [showChat, setShowChat] = useState(false);
 
   useEffect(() => {
     // Create socket connection
@@ -178,10 +182,24 @@ function EditorRoom({ roomId, username }) {
             <span className="hidden md:inline">Download</span>
           </button>
 
+          {/* Chat Toggle */}
+          <button
+            onClick={() => setShowChat(!showChat)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-white text-sm ${
+              showChat 
+                ? 'bg-purple-600 hover:bg-purple-700' 
+                : 'bg-slate-700 hover:bg-slate-600'
+            }`}
+            title="Toggle chat"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span className="hidden md:inline">Chat</span>
+          </button>
+
           {/* Connection indicator */}
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded-lg">
             <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className="text-xs text-slate-300">
+            <span className="text-xs text-slate-300 hidden md:inline">
               {connected ? 'Connected' : 'Connecting...'}
             </span>
           </div>
@@ -196,7 +214,7 @@ function EditorRoom({ roomId, username }) {
         </div>
       </div>
 
-      {/* Main Content - Editor + Sidebar */}
+      {/* Main Content - Editor + Sidebars */}
       <div className="flex-1 flex overflow-hidden">
         
         {/* Code Editor */}
@@ -207,6 +225,17 @@ function EditorRoom({ roomId, username }) {
             onChange={handleCodeChange}
           />
         </div>
+
+        {/* Chat Panel (conditional) */}
+        {showChat && (
+          <div className="w-80 border-l border-slate-700">
+            <ChatBox 
+              socket={socket}
+              roomId={roomId}
+              username={username}
+            />
+          </div>
+        )}
 
         {/* Users Sidebar */}
         <div className="w-64 bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto">
