@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import Groq from 'groq-sdk';
 
 dotenv.config();
 
@@ -40,6 +41,11 @@ Room structure:
 }
 */
 
+// Groq AI client
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY
+});
+
 // ============================================
 // REST API ENDPOINTS
 // ============================================
@@ -50,6 +56,84 @@ app.get('/api/health', (req, res) => {
     message: 'Server is running',
     activeRooms: rooms.size
   });
+});
+
+// ============================================
+// MODULE 5: AI ASSISTANT ENDPOINT (GROQ)
+// ============================================
+app.post('/api/ai-assist', async (req, res) => {
+  try {
+    const { code, question } = req.body;
+    
+    // Validate input
+    if (!question || !question.trim()) {
+      return res.status(400).json({ error: 'Question is required' });
+    }
+
+    console.log('🤖 AI Request received:', { 
+      questionLength: question.length,
+      hasCode: !!code 
+    });
+
+    // Call Groq API with Llama 3
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: "You are a helpful coding assistant. Provide clear, concise, and accurate answers about code. Format your responses in a readable way."
+        },
+        {
+          role: "user",
+          content: `I'm working on this code:
+
+\`\`\`
+${code || 'No code provided yet'}
+\`\`\`
+
+Question: ${question}
+
+Please provide a clear and helpful response.`
+        }
+      ],
+      model: "llama-3.1-70b-versatile", // Fast, free, and powerful!
+      temperature: 0.7,
+      max_tokens: 1024,
+      top_p: 1,
+      stream: false
+    });
+
+    // Extract response
+    const responseText = chatCompletion.choices[0]?.message?.content || 'No response generated';
+
+    console.log('✅ AI Response generated successfully');
+
+    res.json({ 
+      response: responseText,
+      success: true,
+      model: 'llama-3.1-70b-versatile',
+      provider: 'Groq'
+    });
+
+  } catch (error) {
+    console.error('❌ AI Error:', error.message);
+    
+    // Better error messages
+    let errorMessage = 'AI request failed';
+    
+    if (error.message.includes('API key')) {
+      errorMessage = 'Invalid or missing Groq API key. Please check your .env file.';
+    } else if (error.message.includes('rate limit')) {
+      errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+    } else if (error.message.includes('network')) {
+      errorMessage = 'Network error. Please check your internet connection.';
+    }
+    
+    res.status(500).json({ 
+      error: errorMessage,
+      message: error.message,
+      provider: 'Groq'
+    });
+  }
 });
 
 // ============================================
@@ -185,5 +269,13 @@ socket.on('chat-message', ({ roomId, message, username }) => {
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
+  console.log('\n========================================');
   console.log(`\nServer running on port ${PORT}\n`);
+  console.log(`   AI Provider: Groq (FREE & Fast!)`);
+  console.log(`   Model: llama-3.1-70b-versatile`);
+  console.log('   ========================================\n');
+});
+// Error handling
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Rejection:', error);
 });
