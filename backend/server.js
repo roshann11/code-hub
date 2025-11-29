@@ -240,31 +240,70 @@ socket.on('chat-message', ({ roomId, message, username }) => {
   
   // DISCONNECT EVENT
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-    
-    // Find and remove user from all rooms
-    rooms.forEach((room, roomId) => {
-      if (room.users.has(socket.id)) {
-        const user = room.users.get(socket.id);
-        room.users.delete(socket.id);
-        
-        // Notify other users
-        io.to(roomId).emit('user-left', {
-          socketId: socket.id,
-          username: user.username,
-          users: Array.from(room.users.values())
-        });
-        
-        console.log(`Room ${roomId} now has ${room.users.size} user(s)`);
-        
-        // Clean up empty rooms
-        if (room.users.size === 0) {
-          rooms.delete(roomId);
-          console.log(`Deleted empty room: ${roomId}`);
-        }
+  console.log('❌ User disconnected:', socket.id);
+  
+  rooms.forEach((room, roomId) => {
+    if (room.users.has(socket.id)) {
+      const user = room.users.get(socket.id);
+      room.users.delete(socket.id);
+      
+      io.to(roomId).emit('user-left', {
+        socketId: socket.id,
+        username: user.username,
+        users: Array.from(room.users.values())
+      });
+      
+      // Notify video call participants
+      io.to(roomId).emit('user-left-video', { userId: socket.id });
+      
+      if (room.users.size === 0) {
+        rooms.delete(roomId);
+        console.log(`Deleted empty room: ${roomId}`);
       }
-    });
+    }
   });
+});
+
+// ============================================
+// MODULE 6: WEBRTC SIGNALING EVENTS
+// ============================================
+
+// User requests to join video call
+socket.on('join-video-call', ({ roomId }) => {
+  console.log(`📹 ${socket.id} joining video call in room ${roomId}`);
+  
+  const room = rooms.get(roomId);
+  if (room) {
+    // Get all other users in the room
+    const otherUsers = Array.from(room.users.values())
+      .filter(user => user.socketId !== socket.id)
+      .map(user => user.socketId);
+    
+    // Send list of other users to the new caller
+    socket.emit('all-users', { users: otherUsers });
+  }
+});
+
+// WebRTC Offer (Initiator sends offer to receiver)
+socket.on('sending-signal', ({ userToSignal, signal, callerID }) => {
+  console.log(`📹 Sending signal from ${callerID} to ${userToSignal}`);
+  io.to(userToSignal).emit('user-joined-video', { signal, callerID });
+});
+
+// WebRTC Answer (Receiver sends answer back to initiator)
+socket.on('returning-signal', ({ signal, callerID }) => {
+  console.log(`📹 Returning signal to ${callerID}`);
+  io.to(callerID).emit('receiving-returned-signal', { signal, id: socket.id });
+});
+
+// User leaves video call
+socket.on('leave-video-call', ({ roomId }) => {
+  console.log(`📹 ${socket.id} leaving video call`);
+  const room = rooms.get(roomId);
+  if (room) {
+    socket.to(roomId).emit('user-left-video', { userId: socket.id });
+  }
+});
 });
 
 const PORT = process.env.PORT || 3001;
