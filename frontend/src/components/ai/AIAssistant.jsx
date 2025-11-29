@@ -304,3 +304,4 @@ function AIAssistant({ code }) {
 }
 
 export default AIAssistant;
+//console.groq.com/keys

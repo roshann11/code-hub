@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Copy, Check, Download, MessageSquare, X } from 'lucide-react';
+import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot } from 'lucide-react';
 import { io } from 'socket.io-client';
 import CodeEditor from '../components/editor/CodeEditor';
 import LanguageSelector from '../components/editor/LanguageSelector';
 import ChatBox from '../components/chat/Chatbox';
+import AIAssistant from '../components/ai/AIAssistant';
 
 const SOCKET_URL = 'http://localhost:3001';
 
@@ -12,6 +13,7 @@ function EditorRoom({ roomId, username }) {
   const [users, setUsers] = useState([]);
   const [copied, setCopied] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [showAI, setShowAI] = useState(false);
   
   // Editor state
   const [code, setCode] = useState('// Loading...');
@@ -190,10 +192,23 @@ function EditorRoom({ roomId, username }) {
                 ? 'bg-purple-600 hover:bg-purple-700' 
                 : 'bg-slate-700 hover:bg-slate-600'
             }`}
-            title="Toggle chat"
-          >
+            title="Toggle chat">
             <MessageSquare className="w-4 h-4" />
             <span className="hidden md:inline">Chat</span>
+          </button>
+
+          {/* AI Assistant Toggle */}
+          <button
+  onClick={() => setShowAI(!showAI)}
+  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-white text-sm ${
+    showAI 
+      ? 'bg-purple-600 hover:bg-purple-700' 
+      : 'bg-slate-700 hover:bg-slate-600'
+  }`}
+  title="Toggle AI Assistant (Powered by Groq - FREE)"
+>
+  <Bot className="w-4 h-4" />
+  <span className="hidden md:inline">AI</span>
           </button>
 
           {/* Connection indicator */}
@@ -215,69 +230,80 @@ function EditorRoom({ roomId, username }) {
       </div>
 
       {/* Main Content - Editor + Sidebars */}
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* Code Editor */}
-        <div className="flex-1">
-          <CodeEditor 
-            code={code}
-            language={language}
-            onChange={handleCodeChange}
-          />
-        </div>
+<div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+  
+  {/* Code Editor */}
+  <div className="flex-1 min-w-0 min-h-0">
+    <CodeEditor 
+      code={code}
+      language={language}
+      onChange={handleCodeChange}
+    />
+  </div>
 
-        {/* Chat Panel (conditional) */}
-        {showChat && (
-          <div className="w-80 border-l border-slate-700">
-            <ChatBox 
-              socket={socket}
-              roomId={roomId}
-              username={username}
-            />
-          </div>
-        )}
-
-        {/* Users Sidebar */}
-        <div className="w-64 bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto">
-          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-            <Users className="w-5 h-5 text-purple-400" />
-            Active Users ({users.length})
-          </h3>
-          <div className="space-y-2">
-            {users.map((user) => (
-              <div 
-                key={user.socketId}
-                className="flex items-center gap-3 p-2 bg-slate-700/50 rounded-lg"
-              >
-                <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
-                  <span className="text-purple-400 font-semibold text-sm">
-                    {user.username.charAt(0).toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <span className="text-white text-sm block truncate">
-                    {user.username}
-                  </span>
-                  {user.username === username && (
-                    <span className="text-xs text-purple-400">(You)</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Room Info */}
-          <div className="mt-6 p-3 bg-slate-700/30 rounded-lg border border-slate-700">
-            <p className="text-xs text-slate-400 mb-2">Room Code</p>
-            <code className="text-purple-400 font-mono text-sm font-semibold">
-              {roomId}
-            </code>
-            <p className="text-xs text-slate-500 mt-2">
-              Share this code with others to collaborate
-            </p>
-          </div>
-        </div>
+  {/* Right Side Panels Container */}
+  <div className="flex flex-col lg:flex-row border-t lg:border-t-0 lg:border-l border-slate-700 max-h-96 lg:max-h-full">
+    
+    {/* AI Assistant Panel */}
+    {showAI && (
+      <div className="lg:w-96 w-full h-full border-b lg:border-b-0 lg:border-l border-slate-700 flex-shrink-0">
+        <AIAssistant code={code} />
       </div>
+    )}
+
+    {/* Chat Panel */}
+    {showChat && (
+      <div className="lg:w-80 w-full h-full border-b lg:border-b-0 lg:border-l border-slate-700 flex-shrink-0">
+        <ChatBox 
+          socket={socket}
+          roomId={roomId}
+          username={username}
+        />
+      </div>
+    )}
+
+    {/* Users Sidebar */}
+    <div className="lg:w-64 w-full bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto flex-shrink-0">
+      <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+        <Users className="w-5 h-5 text-purple-400" />
+        Active Users ({users.length})
+      </h3>
+      <div className="space-y-2">
+        {users.map((user) => (
+          <div 
+            key={user.socketId}
+            className="flex items-center gap-3 p-2 bg-slate-700/50 rounded-lg"
+          >
+            <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
+              <span className="text-purple-400 font-semibold text-sm">
+                {user.username.charAt(0).toUpperCase()}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="text-white text-sm block truncate">
+                {user.username}
+              </span>
+              {user.username === username && (
+                <span className="text-xs text-purple-400">(You)</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Room Info */}
+      <div className="mt-6 p-3 bg-slate-700/30 rounded-lg border border-slate-700">
+        <p className="text-xs text-slate-400 mb-2">Room Code</p>
+        <code className="text-purple-400 font-mono text-sm font-semibold break-all">
+          {roomId}
+        </code>
+        <p className="text-xs text-slate-500 mt-2">
+          Share this code with others to collaborate
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
     </div>
   );
 }

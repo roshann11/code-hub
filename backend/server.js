@@ -95,7 +95,7 @@ Question: ${question}
 Please provide a clear and helpful response.`
         }
       ],
-      model: "llama-3.1-70b-versatile", // Fast, free, and powerful!
+      model: "llama-3.3-70b-versatile", // Fast, free, and powerful!
       temperature: 0.7,
       max_tokens: 1024,
       top_p: 1,
@@ -110,7 +110,7 @@ Please provide a clear and helpful response.`
     res.json({ 
       response: responseText,
       success: true,
-      model: 'llama-3.1-70b-versatile',
+      model: 'llama-3.3-70b-versatile',
       provider: 'Groq'
     });
 
@@ -272,7 +272,7 @@ httpServer.listen(PORT, () => {
   console.log('\n========================================');
   console.log(`\nServer running on port ${PORT}\n`);
   console.log(`   AI Provider: Groq (FREE & Fast!)`);
-  console.log(`   Model: llama-3.1-70b-versatile`);
+  console.log(`   Model: llama-3.3-70b-versatile`);
   console.log('   ========================================\n');
 });
 // Error handling
