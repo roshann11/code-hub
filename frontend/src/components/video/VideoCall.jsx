@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Video, VideoOff, Mic, MicOff, Phone, PhoneOff, Maximize2, Minimize2 } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Phone, PhoneOff, Maximize2, Minimize2, User } from 'lucide-react';
 import Peer from 'simple-peer';
 
 function VideoCall({ socket, roomId, username }) {
@@ -8,46 +8,118 @@ function VideoCall({ socket, roomId, username }) {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [peers, setPeers] = useState([]);
+  const [streamReady, setStreamReady] = useState(false); // ← ADDED: Missing state
   
   const localVideoRef = useRef(null);
   const localStreamRef = useRef(null);
   const peersRef = useRef([]);
 
+  // Test camera function
+  const testCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: true, 
+        audio: true 
+      });
+      console.log('✅ Camera works!', stream);
+      console.log('Video tracks:', stream.getVideoTracks());
+      console.log('Audio tracks:', stream.getAudioTracks());
+      alert('✅ Camera access granted! Check console for details.');
+      
+      // Stop the test stream
+      stream.getTracks().forEach(track => track.stop());
+    } catch (err) {
+      console.error('❌ Camera error:', err);
+      alert('❌ Camera error: ' + err.name + '\n' + err.message);
+    }
+  };
+
   // Join video call
   const joinCall = async () => {
     try {
-      console.log('Requesting media access...');
+      console.log('📹 Requesting media access...');
       
       // Get user media (camera + microphone)
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
         audio: true
       });
 
+      console.log('✅ Media access granted');
+      console.log('Stream:', stream);
+      console.log('Video tracks:', stream.getVideoTracks());
+      console.log('Audio tracks:', stream.getAudioTracks());
+
       localStreamRef.current = stream;
-      
-      // Display local video
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
 
       setInCall(true);
-      console.log('Media access granted');
-
-      // Tell server we're joining video call
+      console.log('✅ Set inCall to true');
       socket.emit('join-video-call', { roomId });
-
-    } catch (error) {
-      console.error('Error accessing media devices:', error);
-      alert('Could not access camera/microphone. Please check permissions.');
+    }catch (error) {
+      console.error('❌ Error accessing media devices:', error);
+      let errorMsg = 'Could not access camera/microphone. ';
+      if (error.name === 'NotAllowedError') {
+      errorMsg += 'Please allow camera and microphone permissions.';
+    } else if (error.name === 'NotFoundError') {
+      errorMsg += 'No camera or microphone found.';
+    } else if (error.name === 'NotReadableError') {
+      errorMsg += 'Camera is already in use by another application.';
+    } else {
+      errorMsg += error.message;
     }
-  };
+    
+    alert(errorMsg);
+  }
+};
+
+  // Attach stream to video element when it's ready
+  useEffect(() => {
+    if (inCall && localStreamRef.current && localVideoRef.current) {
+      console.log('📺 Attaching stream to video element');
+      
+      localVideoRef.current.srcObject = localStreamRef.current;
+      
+      localVideoRef.current.onloadedmetadata = () => {
+        console.log('✅ Video metadata loaded');
+        console.log('Video dimensions:', localVideoRef.current.videoWidth, 'x', localVideoRef.current.videoHeight);
+      };
+      
+      localVideoRef.current.onloadeddata = () => {
+        console.log('✅ Video data loaded');
+      };
+      
+      localVideoRef.current.onplay = () => {
+        console.log('✅ Video playing');
+        setStreamReady(true);
+      };
+      
+      localVideoRef.current.onerror = (e) => {
+        console.error('❌ Video error:', e);
+      };
+      
+      // Manually play
+      localVideoRef.current.play()
+        .then(() => {
+          console.log('✅ Video play() succeeded');
+          setStreamReady(true);
+        })
+        .catch((playError) => {
+          console.error('❌ Video play() failed:', playError);
+        });
+    }
+  }, [inCall]); // Run when inCall changes
 
   // Leave video call
   const leaveCall = () => {
     // Stop all tracks
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        console.log('🛑 Stopped track:', track.kind);
+      });
     }
 
     // Close all peer connections
@@ -60,6 +132,7 @@ function VideoCall({ socket, roomId, username }) {
     peersRef.current = [];
     setPeers([]);
     setInCall(false);
+    setStreamReady(false);
 
     // Notify server
     socket.emit('leave-video-call', { roomId });
@@ -74,6 +147,7 @@ function VideoCall({ socket, roomId, username }) {
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         setVideoEnabled(videoTrack.enabled);
+        console.log('📹 Video:', videoTrack.enabled ? 'ON' : 'OFF');
       }
     }
   };
@@ -85,6 +159,7 @@ function VideoCall({ socket, roomId, username }) {
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setAudioEnabled(audioTrack.enabled);
+        console.log('🎤 Audio:', audioTrack.enabled ? 'ON' : 'OFF');
       }
     }
   };
@@ -95,6 +170,12 @@ function VideoCall({ socket, roomId, username }) {
       initiator: true,
       trickle: false,
       stream: stream,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
     });
 
     peer.on('signal', signal => {
@@ -114,6 +195,12 @@ function VideoCall({ socket, roomId, username }) {
       initiator: false,
       trickle: false,
       stream: stream,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
     });
 
     peer.on('signal', signal => {
@@ -214,83 +301,133 @@ function VideoCall({ socket, roomId, username }) {
   if (!inCall) {
     // Join Call Button
     return (
-      <div className="bg-slate-800 border-t border-slate-700 p-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-slate-800 border-t border-slate-700 p-3">
+        <div className="flex items-center justify-between max-w-4xl mx-auto">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-slate-700 rounded-lg flex items-center justify-center">
-              <VideoOff className="w-6 h-6 text-slate-400" />
+            <div className="w-10 h-10 bg-slate-700 rounded-lg flex items-center justify-center">
+              <VideoOff className="w-5 h-5 text-slate-400" />
             </div>
             <div>
               <p className="text-white font-medium text-sm">Video Call</p>
-              <p className="text-slate-400 text-xs">Not connected</p>
+              <p className="text-slate-400 text-xs">Click to test or join with camera</p>
             </div>
           </div>
-          <button
-            onClick={joinCall}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center gap-2 font-medium"
-          >
-            <Phone className="w-4 h-4" />
-            Join Call
-          </button>
+          
+          <div className="flex gap-2">
+            <button
+              onClick={testCamera}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
+            >
+              🔍 Test
+            </button>
+            
+            <button
+              onClick={joinCall}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center gap-2 font-medium text-sm"
+            >
+              <Phone className="w-4 h-4" />
+              Join Call
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // In Call UI
+  // In Call UI - Improved Design
   return (
-    <div className={`bg-slate-800 border-t border-slate-700 transition-all ${
-      isExpanded ? 'h-96' : 'h-auto'
+    <div className={`bg-slate-800 border-t border-slate-700 transition-all duration-300 ${
+      isExpanded ? 'h-[500px]' : 'h-auto'
     }`}>
-      <div className="p-4">
+      <div className="p-4 max-w-6xl mx-auto">
         
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             <Video className="w-5 h-5 text-green-400" />
-            <span className="text-white font-medium text-sm">Video Call</span>
-            <span className="text-xs text-slate-400">
-              ({peers.length + 1} participant{peers.length !== 0 ? 's' : ''})
+            <span className="text-white font-medium text-sm">Live Call</span>
+            <span className="text-xs text-slate-400 bg-slate-700 px-2 py-0.5 rounded-full">
+              {peers.length + 1} {peers.length === 0 ? 'participant' : 'participants'}
             </span>
           </div>
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1 hover:bg-slate-700 rounded transition-colors"
-            title={isExpanded ? 'Minimize' : 'Expand'}
-          >
-            {isExpanded ? (
-              <Minimize2 className="w-4 h-4 text-slate-400" />
-            ) : (
-              <Maximize2 className="w-4 h-4 text-slate-400" />
+          <div className="flex items-center gap-2">
+            {!streamReady && (
+              <span className="text-xs text-yellow-400">Loading video...</span>
             )}
-          </button>
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+              title={isExpanded ? 'Minimize' : 'Expand'}
+            >
+              {isExpanded ? (
+                <Minimize2 className="w-4 h-4 text-slate-400" />
+              ) : (
+                <Maximize2 className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Video Grid */}
-        <div className={`grid gap-3 mb-4 ${
-          peers.length === 0 ? 'grid-cols-1' :
+        <div className={`grid gap-3 mb-3 ${
+          peers.length === 0 ? 'grid-cols-1 max-w-md mx-auto' :
           peers.length === 1 ? 'grid-cols-2' :
           peers.length === 2 ? 'grid-cols-3' :
-          'grid-cols-4'
+          peers.length <= 4 ? 'grid-cols-4' :
+          'grid-cols-5'
         }`}>
           
           {/* Local Video */}
-          <div className="relative bg-slate-900 rounded-lg overflow-hidden aspect-video">
+          <div className="relative bg-slate-900 rounded-lg overflow-hidden aspect-video shadow-lg">
             <video
               ref={localVideoRef}
               autoPlay
               muted
               playsInline
-              className="w-full h-full object-cover"
+              className={`w-full h-full object-cover ${!streamReady ? 'opacity-0' : 'opacity-100'} transition-opacity`}
             />
-            <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-xs text-white">
-              You {!videoEnabled && '(Camera Off)'}
-            </div>
-            {!videoEnabled && (
+            
+            {/* Loading State */}
+            {!streamReady && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-                <VideoOff className="w-8 h-8 text-slate-600" />
+                <div className="text-center">
+                  <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                  <p className="text-slate-400 text-xs">Loading camera...</p>
+                </div>
               </div>
             )}
+            
+            {/* Name Tag */}
+            <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm px-2 py-1 rounded text-xs text-white flex items-center gap-1">
+              <User className="w-3 h-3" />
+              <span>{username} (You)</span>
+            </div>
+            
+            {/* Camera Off Overlay */}
+            {!videoEnabled && streamReady && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
+                <div className="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mb-2">
+                  <User className="w-8 h-8 text-slate-400" />
+                </div>
+                <VideoOff className="w-6 h-6 text-slate-500 mb-1" />
+                <span className="text-slate-400 text-xs">Camera Off</span>
+              </div>
+            )}
+            
+            {/* Status Indicators */}
+            <div className="absolute top-2 right-2 flex gap-1">
+              {!videoEnabled && (
+                <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
+                  <VideoOff className="w-3 h-3 text-white" />
+                </div>
+              )}
+              {!audioEnabled && (
+                <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
+                  <MicOff className="w-3 h-3 text-white" />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Remote Videos */}
@@ -300,12 +437,12 @@ function VideoCall({ socket, roomId, username }) {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex items-center justify-center gap-2">
           
           {/* Toggle Video */}
           <button
             onClick={toggleVideo}
-            className={`p-3 rounded-lg transition-colors ${
+            className={`p-3 rounded-lg transition-all ${
               videoEnabled 
                 ? 'bg-slate-700 hover:bg-slate-600 text-white' 
                 : 'bg-red-600 hover:bg-red-700 text-white'
@@ -322,12 +459,12 @@ function VideoCall({ socket, roomId, username }) {
           {/* Toggle Audio */}
           <button
             onClick={toggleAudio}
-            className={`p-3 rounded-lg transition-colors ${
+            className={`p-3 rounded-lg transition-all ${
               audioEnabled 
                 ? 'bg-slate-700 hover:bg-slate-600 text-white' 
                 : 'bg-red-600 hover:bg-red-700 text-white'
             }`}
-            title={audioEnabled ? 'Mute' : 'Unmute'}
+            title={audioEnabled ? 'Mute microphone' : 'Unmute microphone'}
           >
             {audioEnabled ? (
               <Mic className="w-5 h-5" />
@@ -339,10 +476,11 @@ function VideoCall({ socket, roomId, username }) {
           {/* Leave Call */}
           <button
             onClick={leaveCall}
-            className="p-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+            className="p-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-all flex items-center gap-2 px-4"
             title="Leave call"
           >
             <PhoneOff className="w-5 h-5" />
+            <span className="text-sm font-medium">Leave</span>
           </button>
         </div>
       </div>
@@ -353,29 +491,41 @@ function VideoCall({ socket, roomId, username }) {
 // Remote Video Component
 function RemoteVideo({ peer, index }) {
   const ref = useRef();
+  const [hasStream, setHasStream] = useState(false);
 
   useEffect(() => {
     peer.on('stream', stream => {
+      console.log('📹 Received remote stream for peer', index);
       if (ref.current) {
         ref.current.srcObject = stream;
+        setHasStream(true);
       }
     });
 
     return () => {
       peer.off('stream');
     };
-  }, [peer]);
+  }, [peer, index]);
 
   return (
-    <div className="relative bg-slate-900 rounded-lg overflow-hidden aspect-video">
+    <div className="relative bg-slate-900 rounded-lg overflow-hidden aspect-video shadow-lg">
       <video 
         ref={ref} 
         autoPlay 
         playsInline 
-        className="w-full h-full object-cover"
+        className={`w-full h-full object-cover ${!hasStream ? 'opacity-0' : 'opacity-100'} transition-opacity`}
       />
-      <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-xs text-white">
-        Participant {index + 1}
+      
+      {!hasStream && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
+          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+          <p className="text-slate-400 text-xs">Connecting...</p>
+        </div>
+      )}
+      
+      <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm px-2 py-1 rounded text-xs text-white flex items-center gap-1">
+        <User className="w-3 h-3" />
+        <span>Participant {index + 1}</span>
       </div>
     </div>
   );

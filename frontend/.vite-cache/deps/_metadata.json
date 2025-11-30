@@ -1,55 +1,61 @@
 {
-  "hash": "ba6acf6b",
+  "hash": "575f3228",
   "configHash": "80c28aa0",
-  "lockfileHash": "c0f3dd25",
-  "browserHash": "6c414bf8",
+  "lockfileHash": "045656b7",
+  "browserHash": "1ad5d7af",
   "optimized": {
     "react": {
       "src": "../../node_modules/react/index.js",
       "file": "react.js",
-      "fileHash": "6d80f453",
+      "fileHash": "54bc514b",
       "needsInterop": true
     },
     "react-dom": {
       "src": "../../node_modules/react-dom/index.js",
       "file": "react-dom.js",
-      "fileHash": "1ee1d640",
+      "fileHash": "10cdcf0c",
       "needsInterop": true
     },
     "react/jsx-dev-runtime": {
       "src": "../../node_modules/react/jsx-dev-runtime.js",
       "file": "react_jsx-dev-runtime.js",
-      "fileHash": "d1188e45",
+      "fileHash": "d62b514f",
       "needsInterop": true
     },
     "react/jsx-runtime": {
       "src": "../../node_modules/react/jsx-runtime.js",
       "file": "react_jsx-runtime.js",
-      "fileHash": "386cd251",
+      "fileHash": "610b6f4e",
       "needsInterop": true
     },
     "@monaco-editor/react": {
       "src": "../../node_modules/@monaco-editor/react/dist/index.mjs",
       "file": "@monaco-editor_react.js",
-      "fileHash": "1ebee937",
+      "fileHash": "e0bc4040",
       "needsInterop": false
     },
     "lucide-react": {
       "src": "../../node_modules/lucide-react/dist/esm/lucide-react.mjs",
       "file": "lucide-react.js",
-      "fileHash": "d6d6ba6f",
+      "fileHash": "52c0cff4",
       "needsInterop": false
     },
     "react-dom/client": {
       "src": "../../node_modules/react-dom/client.js",
       "file": "react-dom_client.js",
-      "fileHash": "17a88271",
+      "fileHash": "33341732",
+      "needsInterop": true
+    },
+    "simple-peer": {
+      "src": "../../node_modules/simple-peer/index.js",
+      "file": "simple-peer.js",
+      "fileHash": "f5345d05",
       "needsInterop": true
     },
     "socket.io-client": {
       "src": "../../node_modules/socket.io-client/build/esm/index.js",
       "file": "socket__io-client.js",
-      "fileHash": "893d1b41",
+      "fileHash": "3e51f0db",
       "needsInterop": false
     }
   },

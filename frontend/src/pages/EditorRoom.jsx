@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot } from 'lucide-react';
+import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video} from 'lucide-react';
 import { io } from 'socket.io-client';
 import CodeEditor from '../components/editor/CodeEditor';
 import LanguageSelector from '../components/editor/LanguageSelector';
 import ChatBox from '../components/chat/Chatbox';
 import AIAssistant from '../components/ai/AIAssistant';
+import VideoCall from '../components/video/VideoCall';
 
 const SOCKET_URL = 'http://localhost:3001';
 
@@ -14,6 +15,7 @@ function EditorRoom({ roomId, username }) {
   const [copied, setCopied] = useState(false);
   const [connected, setConnected] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
   
   // Editor state
   const [code, setCode] = useState('// Loading...');
@@ -211,6 +213,20 @@ function EditorRoom({ roomId, username }) {
   <span className="hidden md:inline">AI</span>
           </button>
 
+          {/* Video Call Toggle */}
+<button
+  onClick={() => setShowVideo(!showVideo)}
+  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-white text-sm ${
+    showVideo 
+      ? 'bg-purple-600 hover:bg-purple-700' 
+      : 'bg-slate-700 hover:bg-slate-600'
+  }`}
+  title="Toggle video call"
+>
+  <Video className="w-4 h-4" />
+  <span className="hidden md:inline">Video</span>
+</button>
+
           {/* Connection indicator */}
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded-lg">
             <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -304,6 +320,14 @@ function EditorRoom({ roomId, username }) {
     </div>
   </div>
 </div>
+{/* Video Call Panel*/}
+    {showVideo && (
+      <VideoCall 
+        socket={socket}
+        roomId={roomId}
+        username={username}
+      />
+    )}
     </div>
   );
 }
