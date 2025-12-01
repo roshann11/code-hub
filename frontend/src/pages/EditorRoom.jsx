@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video} from 'lucide-react';
+import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video, Play} from 'lucide-react';
 import { io } from 'socket.io-client';
 import CodeEditor from '../components/editor/CodeEditor';
 import LanguageSelector from '../components/editor/LanguageSelector';
 import ChatBox from '../components/chat/Chatbox';
 import AIAssistant from '../components/ai/AIAssistant';
 import VideoCall from '../components/video/VideoCall';
+import CodeOutput from '../components/editor/CodeOutput';
 
 const SOCKET_URL = 'http://localhost:3001';
 
@@ -16,6 +17,7 @@ function EditorRoom({ roomId, username }) {
   const [connected, setConnected] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
+  const [showOutput, setShowOutput] = useState(false);
   
   // Editor state
   const [code, setCode] = useState('// Loading...');
@@ -186,6 +188,20 @@ function EditorRoom({ roomId, username }) {
             <span className="hidden md:inline">Download</span>
           </button>
 
+          {/* Run Code Button */}
+<button
+  onClick={() => setShowOutput(!showOutput)}
+  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-white text-sm ${
+    showOutput 
+      ? 'bg-green-600 hover:bg-green-700' 
+      : 'bg-slate-700 hover:bg-slate-600'
+  }`}
+  title="Run code"
+>
+  <Play className="w-4 h-4" />
+  <span className="hidden md:inline">Run</span>
+</button>
+
           {/* Chat Toggle */}
           <button
             onClick={() => setShowChat(!showChat)}
@@ -320,6 +336,12 @@ function EditorRoom({ roomId, username }) {
     </div>
   </div>
 </div>
+
+{/* Output Panel - Below Editor */}
+  {showOutput && (
+    <CodeOutput code={code} language={language} />
+  )}
+  
 {/* Video Call Panel*/}
     {showVideo && (
       <VideoCall 

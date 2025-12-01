@@ -137,6 +137,126 @@ Please provide a clear and helpful response.`
 });
 
 // ============================================
+// CODE EXECUTION ENDPOINT
+// ============================================
+app.post('/api/execute-code', async (req, res) => {
+  try {
+    const { code, language } = req.body;
+    
+    // Validate input
+    if (!code || !code.trim()) {
+      return res.status(400).json({ error: 'Code is required' });
+    }
+    
+    if (!language) {
+      return res.status(400).json({ error: 'Language is required' });
+    }
+
+    console.log('🚀 Executing code:', { language, codeLength: code.length });
+
+    // Map frontend language names to Piston API language names
+    const languageMap = {
+      'javascript': 'javascript',
+      'typescript': 'typescript',
+      'python': 'python',
+      'java': 'java',
+      'cpp': 'cpp',
+      'c': 'c',
+      'csharp': 'csharp',
+      'go': 'go',
+      'rust': 'rust',
+      'php': 'php',
+      'ruby': 'ruby',
+      'sql': 'sqlite3',
+      'bash': 'bash',
+      'r': 'r',
+      'kotlin': 'kotlin',
+      'swift': 'swift'
+    };
+
+    const pistonLanguage = languageMap[language] || language;
+
+    // Call Piston API
+    const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        language: pistonLanguage,
+        version: '*', // Use latest version
+        files: [
+          {
+            name: `main.${getFileExtension(language)}`,
+            content: code
+          }
+        ],
+        stdin: '',
+        args: [],
+        compile_timeout: 10000,
+        run_timeout: 3000,
+        compile_memory_limit: -1,
+        run_memory_limit: -1
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Execution failed');
+    }
+
+    console.log('✅ Code executed successfully');
+
+    // Format output
+    const output = {
+      success: true,
+      stdout: data.run?.stdout || '',
+      stderr: data.run?.stderr || '',
+      output: data.run?.output || '',
+      exitCode: data.run?.code || 0,
+      executionTime: data.run?.time || 0,
+      language: pistonLanguage,
+      version: data.version || 'unknown'
+    };
+
+    res.json(output);
+
+  } catch (error) {
+    console.error('❌ Execution Error:', error.message);
+    res.status(500).json({ 
+      success: false,
+      error: 'Code execution failed',
+      message: error.message,
+      stderr: error.message
+    });
+  }
+});
+
+// Helper function to get file extension
+function getFileExtension(language) {
+  const extensions = {
+    'javascript': 'js',
+    'typescript': 'ts',
+    'python': 'py',
+    'java': 'java',
+    'cpp': 'cpp',
+    'c': 'c',
+    'csharp': 'cs',
+    'go': 'go',
+    'rust': 'rs',
+    'php': 'php',
+    'ruby': 'rb',
+    'sql': 'sql',
+    'bash': 'sh',
+    'r': 'r',
+    'kotlin': 'kt',
+    'swift': 'swift'
+  };
+  return extensions[language] || 'txt';
+}
+
+// ============================================
 // MODULE 2: SOCKET EVENTS FOR ROOMS
 // ============================================
 
