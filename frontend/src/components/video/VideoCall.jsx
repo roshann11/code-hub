@@ -9,7 +9,7 @@ function VideoCall({ socket, roomId, username }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [peers, setPeers] = useState([]);
   const [streamReady, setStreamReady] = useState(false); // ← ADDED: Missing state
-  
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const localVideoRef = useRef(null);
   const localStreamRef = useRef(null);
   const peersRef = useRef([]);
@@ -163,6 +163,28 @@ function VideoCall({ socket, roomId, username }) {
       }
     }
   };
+  // Toggle fullscreen
+const toggleFullscreen = () => {
+  setIsFullscreen(!isFullscreen);
+  setIsExpanded(false); // Reset expanded when going fullscreen
+};
+
+// Exit fullscreen (for ESC key support)
+const exitFullscreen = () => {
+  setIsFullscreen(false);
+};
+
+// Handle ESC key to exit fullscreen
+useEffect(() => {
+  const handleEscape = (e) => {
+    if (e.key === 'Escape' && isFullscreen) {
+      exitFullscreen();
+    }
+  };
+  
+  window.addEventListener('keydown', handleEscape);
+  return () => window.removeEventListener('keydown', handleEscape);
+}, [isFullscreen]);
 
   // Create peer connection
   const createPeer = (userToSignal, callerID, stream) => {
@@ -334,27 +356,63 @@ function VideoCall({ socket, roomId, username }) {
     );
   }
 
-  // In Call UI - Improved Design
-  return (
-    <div className={`bg-slate-800 border-t border-slate-700 transition-all duration-300 ${
-      isExpanded ? 'h-[500px]' : 'h-auto'
+  // In Call UI
+return (
+  <div className={`bg-slate-800 border-t border-slate-700 transition-all duration-300 ${
+    isFullscreen 
+      ? 'fixed inset-0 z-50 h-screen' 
+      : isExpanded 
+      ? 'h-64'  // ← Changed from h-[500px] to h-64 (256px)
+      : 'h-auto'
+  }`}>
+    
+    {/* Fullscreen Overlay */}
+    {isFullscreen && (
+      <>
+        <div className="absolute inset-0 bg-slate-900"></div>
+        <button
+          onClick={exitFullscreen}
+          className="absolute top-4 right-4 z-10 p-2 bg-slate-800/90 hover:bg-slate-700 rounded-lg transition-colors backdrop-blur-sm"
+          title="Exit Fullscreen (ESC)"
+        >
+          <Minimize2 className="w-5 h-5 text-white" />
+        </button>
+      </>
+    )}
+    
+    <div className={`transition-all relative z-10 ${
+      isFullscreen 
+        ? 'p-4 max-w-full h-full flex flex-col' 
+        : isExpanded 
+        ? 'p-4 max-w-6xl mx-auto'
+        : 'p-2 max-w-6xl mx-auto'  // ← Smaller padding when collapsed
     }`}>
-      <div className="p-4 max-w-6xl mx-auto">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <Video className="w-5 h-5 text-green-400" />
-            <span className="text-white font-medium text-sm">Live Call</span>
-            <span className="text-xs text-slate-400 bg-slate-700 px-2 py-0.5 rounded-full">
-              {peers.length + 1} {peers.length === 0 ? 'participant' : 'participants'}
+      
+      {/* Header - More Compact */}
+      <div className={`flex items-center justify-between ${isExpanded || isFullscreen ? 'mb-3' : 'mb-2'}`}>
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <Video className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'} text-green-400`} />
+          <span className={`text-white font-medium ${isExpanded || isFullscreen ? 'text-sm' : 'text-xs'}`}>
+            Live Call
+          </span>
+          <span className={`text-xs text-slate-400 bg-slate-700 px-2 py-0.5 rounded-full ${!isExpanded && !isFullscreen ? 'hidden sm:inline' : ''}`}>
+            {peers.length + 1} {peers.length === 0 ? 'participant' : 'participants'}
+          </span>
+          {isFullscreen && (
+            <span className="text-xs text-slate-500 ml-2">
+              Press ESC to exit fullscreen
             </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {!streamReady && (
-              <span className="text-xs text-yellow-400">Loading video...</span>
-            )}
+          )}
+        </div>
+        
+        <div className="flex items-center gap-2">
+          {!streamReady && !isFullscreen && (
+            <span className="text-xs text-yellow-400 hidden sm:inline">Loading...</span>
+          )}
+          
+          {/* Expand/Minimize */}
+          {/* {!isFullscreen && (
             <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="p-1.5 hover:bg-slate-700 rounded transition-colors"
@@ -366,56 +424,90 @@ function VideoCall({ socket, roomId, username }) {
                 <Maximize2 className="w-4 h-4 text-slate-400" />
               )}
             </button>
-          </div>
-        </div>
-
-        {/* Video Grid */}
-        <div className={`grid gap-3 mb-3 ${
-          peers.length === 0 ? 'grid-cols-1 max-w-md mx-auto' :
-          peers.length === 1 ? 'grid-cols-2' :
-          peers.length === 2 ? 'grid-cols-3' :
-          peers.length <= 4 ? 'grid-cols-4' :
-          'grid-cols-5'
-        }`}>
+          )} */}
           
-          {/* Local Video */}
-          <div className="relative bg-slate-900 rounded-lg overflow-hidden aspect-video shadow-lg">
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              className={`w-full h-full object-cover ${!streamReady ? 'opacity-0' : 'opacity-100'} transition-opacity`}
-            />
-            
-            {/* Loading State */}
-            {!streamReady && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-                <div className="text-center">
-                  <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+          {/* Fullscreen Button */}
+          <button
+            onClick={toggleFullscreen}
+            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-4 h-4 text-purple-400" />
+            ) : (
+              <Maximize2 className="w-4 h-4 text-purple-400" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Video Grid - Compact when collapsed */}
+      <div className={`grid gap-2 ${
+        isFullscreen ? 'flex-1 mb-3' : 
+        isExpanded ? 'mb-3' : 
+        'mb-2'
+      } ${
+        isFullscreen ? '' : 
+        isExpanded ? '' : 
+        'max-h-32'  // ← Limit height when collapsed
+      } ${
+        peers.length === 0 ? 'grid-cols-1 max-w-md mx-auto' :
+        peers.length === 1 ? 'grid-cols-2' :
+        peers.length === 2 ? 'grid-cols-3' :
+        peers.length <= 4 ? 'grid-cols-4' :
+        peers.length <= 6 ? 'grid-cols-6' :  // ← More columns for compact view
+        'grid-cols-7'
+      }`}>
+        
+        {/* Local Video - Smaller when not expanded */}
+        <div className={`relative bg-slate-900 rounded-lg overflow-hidden shadow-lg ${
+          isExpanded || isFullscreen ? 'aspect-video' : 'aspect-video h-28'  // ← Fixed small height
+        }`}>
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            className={`w-full h-full object-cover ${!streamReady ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+          />
+          
+          {/* Loading State */}
+          {!streamReady && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+              <div className="text-center">
+                <div className={`${isExpanded || isFullscreen ? 'w-12 h-12' : 'w-6 h-6'} border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2`}></div>
+                {(isExpanded || isFullscreen) && (
                   <p className="text-slate-400 text-xs">Loading camera...</p>
-                </div>
+                )}
               </div>
-            )}
-            
-            {/* Name Tag */}
-            <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm px-2 py-1 rounded text-xs text-white flex items-center gap-1">
-              <User className="w-3 h-3" />
-              <span>{username} (You)</span>
             </div>
-            
-            {/* Camera Off Overlay */}
-            {!videoEnabled && streamReady && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
-                <div className="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mb-2">
-                  <User className="w-8 h-8 text-slate-400" />
-                </div>
-                <VideoOff className="w-6 h-6 text-slate-500 mb-1" />
-                <span className="text-slate-400 text-xs">Camera Off</span>
+          )}
+          
+          {/* Name Tag - Smaller when collapsed */}
+          <div className={`absolute bottom-1 left-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1 ${
+            isExpanded || isFullscreen ? 'text-xs' : 'text-[10px]'
+          } text-white`}>
+            <User className={`${isExpanded || isFullscreen ? 'w-3 h-3' : 'w-2 h-2'}`} />
+            <span>{isExpanded || isFullscreen ? `${username} (You)` : 'You'}</span>
+          </div>
+          
+          {/* Camera Off Overlay */}
+          {!videoEnabled && streamReady && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
+              <div className={`${isExpanded || isFullscreen ? 'w-16 h-16' : 'w-8 h-8'} bg-slate-700 rounded-full flex items-center justify-center mb-2`}>
+                <User className={`${isExpanded || isFullscreen ? 'w-8 h-8' : 'w-4 h-4'} text-slate-400`} />
               </div>
-            )}
-            
-            {/* Status Indicators */}
+              {(isExpanded || isFullscreen) && (
+                <>
+                  <VideoOff className="w-6 h-6 text-slate-500 mb-1" />
+                  <span className="text-slate-400 text-xs">Camera Off</span>
+                </>
+              )}
+            </div>
+          )}
+          
+          {/* Status Indicators - Only show when expanded */}
+          {(isExpanded || isFullscreen) && (
             <div className="absolute top-2 right-2 flex gap-1">
               {!videoEnabled && (
                 <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
@@ -428,64 +520,78 @@ function VideoCall({ socket, roomId, username }) {
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Remote Videos */}
-          {peers.map((peerObj, index) => (
-            <RemoteVideo key={peerObj.peerID} peer={peerObj.peer} index={index} />
-          ))}
+          )}
         </div>
 
-        {/* Controls */}
-        <div className="flex items-center justify-center gap-2">
-          
-          {/* Toggle Video */}
-          <button
-            onClick={toggleVideo}
-            className={`p-3 rounded-lg transition-all ${
-              videoEnabled 
-                ? 'bg-slate-700 hover:bg-slate-600 text-white' 
-                : 'bg-red-600 hover:bg-red-700 text-white'
-            }`}
-            title={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
-          >
-            {videoEnabled ? (
-              <Video className="w-5 h-5" />
-            ) : (
-              <VideoOff className="w-5 h-5" />
-            )}
-          </button>
+        {/* Remote Videos - Smaller when not expanded */}
+        {peers.map((peerObj, index) => (
+          <RemoteVideoCompact 
+            key={peerObj.peerID} 
+            peer={peerObj.peer} 
+            index={index}
+            isExpanded={isExpanded || isFullscreen}
+          />
+        ))}
+      </div>
 
-          {/* Toggle Audio */}
-          <button
-            onClick={toggleAudio}
-            className={`p-3 rounded-lg transition-all ${
-              audioEnabled 
-                ? 'bg-slate-700 hover:bg-slate-600 text-white' 
-                : 'bg-red-600 hover:bg-red-700 text-white'
-            }`}
-            title={audioEnabled ? 'Mute microphone' : 'Unmute microphone'}
-          >
-            {audioEnabled ? (
-              <Mic className="w-5 h-5" />
-            ) : (
-              <MicOff className="w-5 h-5" />
-            )}
-          </button>
+      {/* Controls - More Compact */}
+      <div className="flex items-center justify-center gap-2">
+        
+        {/* Toggle Video */}
+        <button
+          onClick={toggleVideo}
+          className={`rounded-lg transition-all ${
+            isExpanded || isFullscreen ? 'p-3' : 'p-2'
+          } ${
+            videoEnabled 
+              ? 'bg-slate-700 hover:bg-slate-600 text-white' 
+              : 'bg-red-600 hover:bg-red-700 text-white'
+          }`}
+          title={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
+        >
+          {videoEnabled ? (
+            <Video className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
+          ) : (
+            <VideoOff className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
+          )}
+        </button>
 
-          {/* Leave Call */}
-          <button
-            onClick={leaveCall}
-            className="p-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-all flex items-center gap-2 px-4"
-            title="Leave call"
-          >
-            <PhoneOff className="w-5 h-5" />
+        {/* Toggle Audio */}
+        <button
+          onClick={toggleAudio}
+          className={`rounded-lg transition-all ${
+            isExpanded || isFullscreen ? 'p-3' : 'p-2'
+          } ${
+            audioEnabled 
+              ? 'bg-slate-700 hover:bg-slate-600 text-white' 
+              : 'bg-red-600 hover:bg-red-700 text-white'
+          }`}
+          title={audioEnabled ? 'Mute microphone' : 'Unmute microphone'}
+        >
+          {audioEnabled ? (
+            <Mic className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
+          ) : (
+            <MicOff className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
+          )}
+        </button>
+
+        {/* Leave Call */}
+        <button
+          onClick={leaveCall}
+          className={`bg-red-600 hover:bg-red-700 text-white rounded-lg transition-all flex items-center gap-2 ${
+            isExpanded || isFullscreen ? 'p-3 px-4' : 'p-2 px-3'
+          }`}
+          title="Leave call"
+        >
+          <PhoneOff className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
+          {(isExpanded || isFullscreen) && (
             <span className="text-sm font-medium">Leave</span>
-          </button>
-        </div>
+          )}
+        </button>
       </div>
     </div>
-  );
+  </div>
+);
 }
 
 // Remote Video Component
@@ -530,5 +636,53 @@ function RemoteVideo({ peer, index }) {
     </div>
   );
 }
+// Compact Remote Video Component
+// function RemoteVideoCompact({ peer, index, isExpanded }) {
+//   const ref = useRef();
+//   const [hasStream, setHasStream] = useState(false);
+
+//   useEffect(() => {
+//     peer.on('stream', stream => {
+//       console.log('📹 Received remote stream for peer', index);
+//       if (ref.current) {
+//         ref.current.srcObject = stream;
+//         setHasStream(true);
+//       }
+//     });
+
+//     return () => {
+//       peer.off('stream');
+//     };
+//   }, [peer, index]);
+
+//   return (
+//     <div className={`relative bg-slate-900 rounded-lg overflow-hidden shadow-lg ${
+//       isExpanded ? 'aspect-video' : 'aspect-video h-28'
+//     }`}>
+//       <video 
+//         ref={ref} 
+//         autoPlay 
+//         playsInline 
+//         className={`w-full h-full object-cover ${!hasStream ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+//       />
+      
+//       {!hasStream && (
+//         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
+//           <div className={`${isExpanded ? 'w-12 h-12' : 'w-6 h-6'} border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-2`}></div>
+//           {isExpanded && (
+//             <p className="text-slate-400 text-xs">Connecting...</p>
+//           )}
+//         </div>
+//       )}
+      
+//       <div className={`absolute bottom-1 left-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1 ${
+//         isExpanded ? 'text-xs' : 'text-[10px]'
+//       } text-white`}>
+//         <User className={`${isExpanded ? 'w-3 h-3' : 'w-2 h-2'}`} />
+//         <span>{isExpanded ? `Participant ${index + 1}` : `P${index + 1}`}</span>
+//       </div>
+//     </div>
+//   );
+// }
 
 export default VideoCall;

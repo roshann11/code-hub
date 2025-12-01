@@ -7,55 +7,55 @@
     "react": {
       "src": "../../node_modules/react/index.js",
       "file": "react.js",
-      "fileHash": "54bc514b",
+      "fileHash": "4484c703",
       "needsInterop": true
     },
     "react-dom": {
       "src": "../../node_modules/react-dom/index.js",
       "file": "react-dom.js",
-      "fileHash": "10cdcf0c",
+      "fileHash": "e6f103bc",
       "needsInterop": true
     },
     "react/jsx-dev-runtime": {
       "src": "../../node_modules/react/jsx-dev-runtime.js",
       "file": "react_jsx-dev-runtime.js",
-      "fileHash": "d62b514f",
+      "fileHash": "c417ddc0",
       "needsInterop": true
     },
     "react/jsx-runtime": {
       "src": "../../node_modules/react/jsx-runtime.js",
       "file": "react_jsx-runtime.js",
-      "fileHash": "610b6f4e",
+      "fileHash": "e0941fdc",
       "needsInterop": true
     },
     "@monaco-editor/react": {
       "src": "../../node_modules/@monaco-editor/react/dist/index.mjs",
       "file": "@monaco-editor_react.js",
-      "fileHash": "e0bc4040",
+      "fileHash": "5067992d",
       "needsInterop": false
     },
     "lucide-react": {
       "src": "../../node_modules/lucide-react/dist/esm/lucide-react.mjs",
       "file": "lucide-react.js",
-      "fileHash": "52c0cff4",
+      "fileHash": "00bb2070",
       "needsInterop": false
     },
     "react-dom/client": {
       "src": "../../node_modules/react-dom/client.js",
       "file": "react-dom_client.js",
-      "fileHash": "33341732",
+      "fileHash": "b62a03aa",
       "needsInterop": true
     },
     "simple-peer": {
       "src": "../../node_modules/simple-peer/index.js",
       "file": "simple-peer.js",
-      "fileHash": "f5345d05",
+      "fileHash": "7c1cb99b",
       "needsInterop": true
     },
     "socket.io-client": {
       "src": "../../node_modules/socket.io-client/build/esm/index.js",
       "file": "socket__io-client.js",
-      "fileHash": "3e51f0db",
+      "fileHash": "fa007704",
       "needsInterop": false
     }
   },
