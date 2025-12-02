@@ -17,7 +17,7 @@ const httpServer = createServer(app);
 // Socket.IO setup
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173","https://code-ml0y7046j-roshann11s-projects.vercel.app"],
     methods: ["GET", "POST"]
   }
 });
