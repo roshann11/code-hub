@@ -9,10 +9,35 @@ import Groq from 'groq-sdk';
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://code-96t8bkh39-roshann11s-projects.vercel.app',
+  'https://code-hub-roshann11s-projects.vercel.app', // Vercel also creates this
+  /https:\/\/.*\.vercel\.app$/ // Allow all Vercel preview deployments
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.some(allowed => {
+      if (allowed instanceof RegExp) return allowed.test(origin);
+      return allowed === origin;
+    })) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 const httpServer = createServer(app);
+
+
 
 // Socket.IO setup
 const io = new Server(httpServer, {
