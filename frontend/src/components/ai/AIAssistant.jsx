@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bot, Send, Sparkles, Loader, AlertCircle, Zap } from 'lucide-react';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 function AIAssistant({ code }) {
   const [question, setQuestion] = useState('');

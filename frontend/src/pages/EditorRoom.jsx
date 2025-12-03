@@ -8,7 +8,7 @@ import AIAssistant from '../components/ai/AIAssistant';
 import VideoCall from '../components/video/VideoCall';
 import CodeOutput from '../components/editor/CodeOutput';
 
-const SOCKET_URL = 'https://code-hub-1-njxz.onrender.com';
+const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 function EditorRoom({ roomId, username }) {
   const [socket, setSocket] = useState(null);

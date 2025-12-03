@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Play, Square, Terminal, AlertCircle, CheckCircle, Clock, Loader } from 'lucide-react';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 function CodeOutput({ code, language }) {
   const [output, setOutput] = useState(null);
