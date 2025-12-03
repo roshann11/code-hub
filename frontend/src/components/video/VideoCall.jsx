@@ -13,6 +13,34 @@ function VideoCall({ socket, roomId, username }) {
   const localVideoRef = useRef(null);
   const localStreamRef = useRef(null);
   const peersRef = useRef([]);
+  const ICE_SERVERS = {
+  iceServers: [
+    // Google's public STUN servers
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    
+    // OpenRelay TURN server (free, no auth needed)
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ],
+  iceCandidatePoolSize: 10
+};
 
   // Test camera function
   const testCamera = async () => {
@@ -21,23 +49,23 @@ function VideoCall({ socket, roomId, username }) {
         video: true, 
         audio: true 
       });
-      console.log('✅ Camera works!', stream);
+      console.log('Camera works!', stream);
       console.log('Video tracks:', stream.getVideoTracks());
       console.log('Audio tracks:', stream.getAudioTracks());
-      alert('✅ Camera access granted! Check console for details.');
+      alert('Camera access granted! Check console for details.');
       
       // Stop the test stream
       stream.getTracks().forEach(track => track.stop());
     } catch (err) {
-      console.error('❌ Camera error:', err);
-      alert('❌ Camera error: ' + err.name + '\n' + err.message);
+      console.error('Camera error:', err);
+      alert('Camera error: ' + err.name + '\n' + err.message);
     }
   };
 
   // Join video call
   const joinCall = async () => {
     try {
-      console.log('📹 Requesting media access...');
+      console.log('Requesting media access...');
       
       // Get user media (camera + microphone)
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -48,7 +76,7 @@ function VideoCall({ socket, roomId, username }) {
         audio: true
       });
 
-      console.log('✅ Media access granted');
+      console.log('Media access granted');
       console.log('Stream:', stream);
       console.log('Video tracks:', stream.getVideoTracks());
       console.log('Audio tracks:', stream.getAudioTracks());
@@ -188,123 +216,178 @@ useEffect(() => {
 
   // Create peer connection
   const createPeer = (userToSignal, callerID, stream) => {
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream: stream,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
-      }
+  console.log('Creating peer (initiator) for:', userToSignal);
+  
+  const peer = new Peer({
+    initiator: true,
+    trickle: false, // Don't trickle ICE candidates
+    stream: stream,
+    config: ICE_SERVERS
+  });
+
+  peer.on('signal', signal => {
+    console.log('Sending signal to:', userToSignal);
+    socket.emit('sending-signal', { 
+      userToSignal, 
+      callerID, 
+      signal 
     });
+  });
 
-    peer.on('signal', signal => {
-      socket.emit('sending-signal', { userToSignal, callerID, signal });
+  peer.on('stream', remoteStream => {
+    console.log('Received remote stream from:', userToSignal);
+  });
+
+  peer.on('error', err => {
+    console.error('Peer error (initiator):', err);
+  });
+
+  peer.on('connect', () => {
+    console.log('Peer connected (initiator):', userToSignal);
+  });
+
+  peer.on('close', () => {
+    console.log('Peer connection closed:', userToSignal);
+  });
+
+  return peer;
+};
+
+// Add peer (RECEIVER)
+const addPeer = (incomingSignal, callerID, stream) => {
+  console.log('Adding peer (receiver) from:', callerID);
+  
+  const peer = new Peer({
+    initiator: false,
+    trickle: false,
+    stream: stream,
+    config: ICE_SERVERS
+  });
+
+  peer.on('signal', signal => {
+    console.log('Returning signal to:', callerID);
+    socket.emit('returning-signal', { 
+      signal, 
+      callerID 
     });
+  });
 
-    peer.on('error', err => {
-      console.error('Peer error:', err);
-    });
+  peer.on('stream', remoteStream => {
+    console.log('Received remote stream from:', callerID);
+  });
 
-    return peer;
-  };
+  peer.on('error', err => {
+    console.error('Peer error (receiver):', err);
+  });
 
-  // Add peer
-  const addPeer = (incomingSignal, callerID, stream) => {
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream: stream,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
-      }
-    });
+  peer.on('connect', () => {
+    console.log('Peer connected (receiver):', callerID);
+  });
 
-    peer.on('signal', signal => {
-      socket.emit('returning-signal', { signal, callerID });
-    });
+  peer.on('close', () => {
+    console.log('Peer connection closed:', callerID);
+  });
 
-    peer.on('error', err => {
-      console.error('Peer error:', err);
-    });
+  peer.signal(incomingSignal);
 
-    peer.signal(incomingSignal);
+  return peer;
+};
 
-    return peer;
-  };
 
-  // Socket event listeners
-  useEffect(() => {
-    if (!socket || !inCall) return;
+// Socket event listeners
+useEffect(() => {
+  if (!socket || !inCall) return;
 
-    // When we receive list of users already in call
-    socket.on('all-users', ({ users }) => {
-      console.log('📹 Users in call:', users);
+  // When we receive list of users already in call
+  socket.on('all-users', ({ users }) => {
+    console.log('Received all-users:', users);
+    
+    if (!localStreamRef.current) {
+      console.error('No local stream available');
+      return;
+    }
+    
+    const newPeers = [];
+    users.forEach(user => {
+      console.log('Creating peer for user:', user.socketId || user);
+      const userId = user.socketId || user; // Handle both formats
       
-      const newPeers = [];
-      users.forEach(userID => {
-        const peer = createPeer(userID, socket.id, localStreamRef.current);
-        peersRef.current.push({
-          peerID: userID,
-          peer,
-        });
-        newPeers.push({
-          peerID: userID,
-          peer,
-        });
-      });
-      setPeers(newPeers);
-    });
-
-    // When another user joins the call
-    socket.on('user-joined-video', ({ signal, callerID }) => {
-      console.log('📹 User joined video:', callerID);
-      
-      const peer = addPeer(signal, callerID, localStreamRef.current);
+      const peer = createPeer(userId, socket.id, localStreamRef.current);
       
       peersRef.current.push({
-        peerID: callerID,
+        peerID: userId,
         peer,
       });
+      
+      newPeers.push({
+        peerID: userId,
+        peer,
+      });
+    });
+    
+    setPeers(newPeers);
+    console.log('Created', newPeers.length, 'peer connections');
+  });
 
-      setPeers(prev => [...prev, { peerID: callerID, peer }]);
+  // When another user joins the call
+  socket.on('user-joined-video', ({ signal, callerID }) => {
+    console.log('User joined video:', callerID);
+    
+    if (!localStreamRef.current) {
+      console.error('No local stream for incoming peer');
+      return;
+    }
+    
+    const peer = addPeer(signal, callerID, localStreamRef.current);
+    
+    peersRef.current.push({
+      peerID: callerID,
+      peer,
     });
 
-    // When we receive answer from another peer
-    socket.on('receiving-returned-signal', ({ signal, id }) => {
-      console.log('📹 Received returned signal from:', id);
-      
-      const item = peersRef.current.find(p => p.peerID === id);
-      if (item) {
-        item.peer.signal(signal);
+    setPeers(prev => {
+      // Avoid duplicates
+      if (prev.find(p => p.peerID === callerID)) {
+        console.log('Peer already exists:', callerID);
+        return prev;
       }
+      return [...prev, { peerID: callerID, peer }];
     });
+  });
 
-    // When a user leaves video call
-    socket.on('user-left-video', ({ userId }) => {
-      console.log('📹 User left video:', userId);
-      
-      const peerObj = peersRef.current.find(p => p.peerID === userId);
-      if (peerObj) {
-        peerObj.peer.destroy();
-      }
-      
-      peersRef.current = peersRef.current.filter(p => p.peerID !== userId);
-      setPeers(prev => prev.filter(p => p.peerID !== userId));
-    });
+  // When we receive answer from another peer
+  socket.on('receiving-returned-signal', ({ signal, id }) => {
+    console.log('Received returned signal from:', id);
+    
+    const item = peersRef.current.find(p => p.peerID === id);
+    if (item) {
+      console.log('Signaling peer:', id);
+      item.peer.signal(signal);
+    } else {
+      console.error('Peer not found for signal:', id);
+    }
+  });
 
-    return () => {
-      socket.off('all-users');
-      socket.off('user-joined-video');
-      socket.off('receiving-returned-signal');
-      socket.off('user-left-video');
-    };
-  }, [socket, inCall]);
+  // When a user leaves video call
+  socket.on('user-left-video', ({ userId }) => {
+    console.log('User left video:', userId);
+    
+    const peerObj = peersRef.current.find(p => p.peerID === userId);
+    if (peerObj) {
+      peerObj.peer.destroy();
+    }
+    
+    peersRef.current = peersRef.current.filter(p => p.peerID !== userId);
+    setPeers(prev => prev.filter(p => p.peerID !== userId));
+  });
+
+  return () => {
+    socket.off('all-users');
+    socket.off('user-joined-video');
+    socket.off('receiving-returned-signal');
+    socket.off('user-left-video');
+  };
+}, [socket, inCall]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -595,9 +678,11 @@ return (
 }
 
 // Remote Video Component
+// Remote Video Component - WITH DEBUG INFO
 function RemoteVideo({ peer, index }) {
   const ref = useRef();
   const [hasStream, setHasStream] = useState(false);
+  const [connectionState, setConnectionState] = useState('connecting');
 
   useEffect(() => {
     peer.on('stream', stream => {
@@ -608,13 +693,33 @@ function RemoteVideo({ peer, index }) {
       }
     });
 
+    peer.on('connect', () => {
+      console.log('✅ Peer', index, 'connected');
+      setConnectionState('connected');
+    });
+
+    peer.on('close', () => {
+      console.log('❌ Peer', index, 'closed');
+      setConnectionState('closed');
+    });
+
+    peer.on('error', (err) => {
+      console.error('❌ Peer', index, 'error:', err);
+      setConnectionState('error');
+    });
+
     return () => {
       peer.off('stream');
+      peer.off('connect');
+      peer.off('close');
+      peer.off('error');
     };
   }, [peer, index]);
 
   return (
-    <div className="relative bg-slate-900 rounded-lg overflow-hidden aspect-video shadow-lg">
+    <div className={`relative bg-slate-900 rounded-lg overflow-hidden shadow-lg ${
+      isExpanded ? 'aspect-video' : 'aspect-video h-28'
+    }`}>
       <video 
         ref={ref} 
         autoPlay 
@@ -624,14 +729,25 @@ function RemoteVideo({ peer, index }) {
       
       {!hasStream && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
-          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-2"></div>
-          <p className="text-slate-400 text-xs">Connecting...</p>
+          <div className={`${isExpanded ? 'w-12 h-12' : 'w-6 h-6'} border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-2`}></div>
+          {isExpanded && (
+            <>
+              <p className="text-slate-400 text-xs">Connecting...</p>
+              <p className="text-slate-500 text-[10px] mt-1">{connectionState}</p>
+            </>
+          )}
         </div>
       )}
       
-      <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm px-2 py-1 rounded text-xs text-white flex items-center gap-1">
-        <User className="w-3 h-3" />
-        <span>Participant {index + 1}</span>
+      <div className={`absolute bottom-1 left-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1 ${
+        isExpanded ? 'text-xs' : 'text-[10px]'
+      } text-white`}>
+        <User className={`${isExpanded ? 'w-3 h-3' : 'w-2 h-2'}`} />
+        <span>{isExpanded ? `Participant ${index + 1}` : `P${index + 1}`}</span>
+        {/* Debug status indicator */}
+        <span className={`ml-1 w-1.5 h-1.5 rounded-full ${
+          hasStream ? 'bg-green-400' : 'bg-yellow-400'
+        }`}></span>
       </div>
     </div>
   );
