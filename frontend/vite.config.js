@@ -8,7 +8,10 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false
+    sourcemap: false,
+    commonjsOptions: {
+      transformMixedEsModules: true
+    }
   },
   define: {
     'global': 'globalThis',
@@ -16,6 +19,16 @@ export default defineConfig({
   resolve: {
     alias: {
       process: "process/browser",
+      stream: "stream-browserify",
+      util: "util"
+    }
+  },
+  optimizeDeps: {
+    include: ['simple-peer'],
+    esbuildOptions: {
+      define: {
+        global: 'globalThis'
+      }
     }
   }
 })
