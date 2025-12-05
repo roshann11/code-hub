@@ -1,6 +1,3 @@
-// ============================================
-// IMPORTS
-// ============================================
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -11,9 +8,8 @@ dotenv.config();
 
 const app = express();
 
-// ============================================
-// CORS CONFIGURATION - CRITICAL FOR PRODUCTION
-// ============================================
+
+// CORS CONFIGURATION 
 const allowedOrigins = [
   'http://localhost:5173',
   'https://code-96t8bkh39-roshann11s-projects.vercel.app',
@@ -41,7 +37,7 @@ app.use(cors({
     if (isAllowed) {
       callback(null, true);
     } else {
-      console.log('❌ CORS blocked origin:', origin);
+      console.log('CORS blocked origin:', origin);
       callback(null, true); // Allow anyway for debugging - REMOVE IN PRODUCTION
     }
   },
@@ -54,9 +50,7 @@ app.use(express.json());
 
 const httpServer = createServer(app);
 
-// ============================================
-// SOCKET.IO CONFIGURATION - CRITICAL FOR PRODUCTION
-// ============================================
+// SOCKET.IO CONFIGURATION 
 const io = new Server(httpServer, {
   cors: {
     origin: function (origin, callback) {
@@ -70,7 +64,7 @@ const io = new Server(httpServer, {
       if (isAllowed) {
         callback(null, true);
       } else {
-        console.log('❌ Socket.IO CORS blocked:', origin);
+        console.log('Socket.IO CORS blocked:', origin);
         callback(null, true); // Allow anyway for debugging
       }
     },
@@ -84,14 +78,11 @@ const io = new Server(httpServer, {
   pingInterval: 25000
 });
 
-// ============================================
 // DATA STORAGE
-// ============================================
+
 const rooms = new Map();
 
-// ============================================
 // REST API ENDPOINTS
-// ============================================
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -122,7 +113,7 @@ app.post('/api/ai-assist', async (req, res) => {
       });
     }
 
-    console.log('🤖 AI Request received');
+    console.log('AI Request received');
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -131,7 +122,7 @@ app.post('/api/ai-assist', async (req, res) => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'llama-3.1-70b-versatile',
+        model: 'llama-3.3-70b-versatile',
         messages: [
           {
             role: 'system',
@@ -155,17 +146,17 @@ app.post('/api/ai-assist', async (req, res) => {
     const data = await response.json();
     const responseText = data.choices?.[0]?.message?.content || 'No response generated';
 
-    console.log('✅ AI Response generated');
+    console.log('AI Response generated');
 
     res.json({ 
       response: responseText,
       success: true,
-      model: 'llama-3.1-70b-versatile',
+      model: 'llama-3.3-70b-versatile',
       provider: 'Groq'
     });
 
   } catch (error) {
-    console.error('❌ AI Error:', error.message);
+    console.error('AI Error:', error.message);
     res.status(500).json({ 
       error: 'AI request failed',
       message: error.message
@@ -173,9 +164,8 @@ app.post('/api/ai-assist', async (req, res) => {
   }
 });
 
-// ============================================
 // CODE EXECUTION ENDPOINT
-// ============================================
+
 app.post('/api/execute-code', async (req, res) => {
   try {
     const { code, language } = req.body;
@@ -227,7 +217,7 @@ app.post('/api/execute-code', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Execution Error:', error.message);
+    console.error('Execution Error:', error.message);
     res.status(500).json({ 
       success: false,
       error: 'Code execution failed',
@@ -236,15 +226,14 @@ app.post('/api/execute-code', async (req, res) => {
   }
 });
 
-// ============================================
+
 // SOCKET.IO EVENTS
-// ============================================
 
 io.on('connection', (socket) => {
-  console.log('✅ User connected:', socket.id);
+  console.log('User connected:', socket.id);
   
   socket.on('join-room', ({ roomId, username }) => {
-    console.log(`👤 ${username} joining room: ${roomId}`);
+    console.log(` ${username} joining room: ${roomId}`);
     socket.join(roomId);
     
     if (!rooms.has(roomId)) {
@@ -303,10 +292,6 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('new-message', chatMessage);
     }
   });
-
-// ============================================
-// WEBRTC SIGNALING EVENTS (UPDATED FOR PRODUCTION)
-// ============================================
 
 // WebRTC with PeerJS
 socket.on('join-video-call', ({ roomId, peerId }) => {
@@ -367,17 +352,13 @@ socket.on('leave-video-call', ({ roomId }) => {
   });
 });
 
-// ============================================
 // START SERVER
-// ============================================
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
-  console.log('\n🚀 ========================================');
   console.log(`   Server running on port ${PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log('   ========================================\n');
 });
 
 process.on('unhandledRejection', (error) => {
-  console.error('❌ Unhandled Rejection:', error);
+  console.error('Unhandled Rejection:', error);
 });
