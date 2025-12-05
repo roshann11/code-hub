@@ -308,30 +308,20 @@ io.on('connection', (socket) => {
 // WEBRTC SIGNALING EVENTS (UPDATED FOR PRODUCTION)
 // ============================================
 
-// User requests to join video call
-socket.on('join-video-call', ({ roomId }) => {
-  console.log(`📹 ${socket.id} joining video call in room ${roomId}`);
+// WebRTC with PeerJS
+socket.on('join-video-call', ({ roomId, peerId }) => {
+  console.log(` ${peerId} joining video call in room ${roomId}`);
   
   const room = rooms.get(roomId);
   if (room) {
-    // Get all other users in the room
-    const otherUsers = Array.from(room.users.values())
-      .filter(user => user.socketId !== socket.id)
-      .map(user => ({
-        socketId: user.socketId,
-        username: user.username
-      }));
-    
-    console.log(`📹 Sending ${otherUsers.length} other users to ${socket.id}`);
-    
-    // Send list of other users to the new caller
-    socket.emit('all-users', { users: otherUsers });
+    // Notify all other users about the new peer
+    socket.to(roomId).emit('user-joined-video-call', { peerId });
   }
 });
 
 // Initiator sends offer to receiver
 socket.on('sending-signal', ({ userToSignal, signal, callerID }) => {
-  console.log(`📹 Sending signal from ${callerID} to ${userToSignal}`);
+  console.log(` Sending signal from ${callerID} to ${userToSignal}`);
   io.to(userToSignal).emit('user-joined-video', { 
     signal, 
     callerID 
@@ -340,7 +330,7 @@ socket.on('sending-signal', ({ userToSignal, signal, callerID }) => {
 
 // Receiver sends answer back to initiator
 socket.on('returning-signal', ({ signal, callerID }) => {
-  console.log(`📹 Returning signal to ${callerID} from ${socket.id}`);
+  console.log(` Returning signal to ${callerID} from ${socket.id}`);
   io.to(callerID).emit('receiving-returned-signal', { 
     signal, 
     id: socket.id 
@@ -349,15 +339,12 @@ socket.on('returning-signal', ({ signal, callerID }) => {
 
 // User leaves video call
 socket.on('leave-video-call', ({ roomId }) => {
-  console.log(`📹 ${socket.id} leaving video call`);
-  const room = rooms.get(roomId);
-  if (room) {
-    socket.to(roomId).emit('user-left-video', { userId: socket.id });
-  }
+  console.log(` ${socket.id} leaving video call`);
+  socket.to(roomId).emit('user-left-video', { peerId: socket.id });
 });
 
   socket.on('disconnect', () => {
-    console.log('❌ User disconnected:', socket.id);
+    console.log('User disconnected:', socket.id);
     
     rooms.forEach((room, roomId) => {
       if (room.users.has(socket.id)) {

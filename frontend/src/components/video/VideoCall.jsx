@@ -1,410 +1,233 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Video, VideoOff, Mic, MicOff, Phone, PhoneOff, Maximize2, Minimize2, User } from 'lucide-react';
-import Peer from 'simple-peer';
+import Peer from 'peerjs';
 
 function VideoCall({ socket, roomId, username }) {
   const [inCall, setInCall] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [peers, setPeers] = useState([]);
-  const [streamReady, setStreamReady] = useState(false); // ← ADDED: Missing state
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [streamReady, setStreamReady] = useState(false);
+  const [remotePeers, setRemotePeers] = useState([]);
+  
   const localVideoRef = useRef(null);
   const localStreamRef = useRef(null);
-  const peersRef = useRef([]);
-  const ICE_SERVERS = {
-  iceServers: [
-    // Google's public STUN servers
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    
-    // OpenRelay TURN server (free, no auth needed)
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ],
-  iceCandidatePoolSize: 10
-};
+  const peerRef = useRef(null);
+  const connectionsRef = useRef([]);
 
-  // Test camera function
   const testCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: true, 
         audio: true 
       });
-      console.log('Camera works!', stream);
-      console.log('Video tracks:', stream.getVideoTracks());
-      console.log('Audio tracks:', stream.getAudioTracks());
-      alert('Camera access granted! Check console for details.');
-      
-      // Stop the test stream
+      console.log('✅ Camera works!', stream);
+      alert('✅ Camera access granted!');
       stream.getTracks().forEach(track => track.stop());
     } catch (err) {
-      console.error('Camera error:', err);
-      alert('Camera error: ' + err.name + '\n' + err.message);
+      console.error('❌ Camera error:', err);
+      alert('❌ Camera error: ' + err.name);
     }
   };
 
-  // Join video call
   const joinCall = async () => {
     try {
-      console.log('Requesting media access...');
+      console.log('📹 Requesting media access...');
       
-      // Get user media (camera + microphone)
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: true
       });
 
-      console.log('Media access granted');
-      console.log('Stream:', stream);
-      console.log('Video tracks:', stream.getVideoTracks());
-      console.log('Audio tracks:', stream.getAudioTracks());
-
+      console.log('✅ Media access granted');
       localStreamRef.current = stream;
-
+      
       setInCall(true);
-      console.log('✅ Set inCall to true');
-      socket.emit('join-video-call', { roomId });
-    }catch (error) {
-      console.error('❌ Error accessing media devices:', error);
-      let errorMsg = 'Could not access camera/microphone. ';
-      if (error.name === 'NotAllowedError') {
-      errorMsg += 'Please allow camera and microphone permissions.';
-    } else if (error.name === 'NotFoundError') {
-      errorMsg += 'No camera or microphone found.';
-    } else if (error.name === 'NotReadableError') {
-      errorMsg += 'Camera is already in use by another application.';
-    } else {
-      errorMsg += error.message;
-    }
-    
-    alert(errorMsg);
-  }
-};
 
-  // Attach stream to video element when it's ready
+    } catch (error) {
+      console.error('❌ Error accessing media devices:', error);
+      alert('Could not access camera: ' + error.message);
+    }
+  };
+
+  // Attach stream to video when inCall changes
   useEffect(() => {
     if (inCall && localStreamRef.current && localVideoRef.current) {
       console.log('📺 Attaching stream to video element');
-      
       localVideoRef.current.srcObject = localStreamRef.current;
       
-      localVideoRef.current.onloadedmetadata = () => {
-        console.log('✅ Video metadata loaded');
-        console.log('Video dimensions:', localVideoRef.current.videoWidth, 'x', localVideoRef.current.videoHeight);
-      };
-      
-      localVideoRef.current.onloadeddata = () => {
-        console.log('✅ Video data loaded');
-      };
-      
-      localVideoRef.current.onplay = () => {
-        console.log('✅ Video playing');
-        setStreamReady(true);
-      };
-      
-      localVideoRef.current.onerror = (e) => {
-        console.error('❌ Video error:', e);
-      };
-      
-      // Manually play
       localVideoRef.current.play()
         .then(() => {
-          console.log('✅ Video play() succeeded');
+          console.log('✅ Video playing');
           setStreamReady(true);
         })
-        .catch((playError) => {
-          console.error('❌ Video play() failed:', playError);
+        .catch(err => console.error('❌ Video play failed:', err));
+    }
+  }, [inCall]);
+
+  // Initialize PeerJS
+  useEffect(() => {
+    if (!inCall || !socket) return;
+
+    console.log('📹 Initializing PeerJS...');
+
+    // Create PeerJS instance with unique ID
+    const peer = new Peer(socket.id, {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+          }
+        ]
+      },
+      debug: 2 // Show debug logs
+    });
+
+    peerRef.current = peer;
+
+    peer.on('open', (id) => {
+      console.log('✅ PeerJS initialized with ID:', id);
+      // Tell server we're joining video call
+      socket.emit('join-video-call', { roomId, peerId: id });
+    });
+
+    // Handle incoming calls
+    peer.on('call', (call) => {
+      console.log('📹 Receiving call from:', call.peer);
+      
+      // Answer with our stream
+      call.answer(localStreamRef.current);
+      
+      // When we receive their stream
+      call.on('stream', (remoteStream) => {
+        console.log('✅ Received remote stream from:', call.peer);
+        
+        setRemotePeers(prev => {
+          // Avoid duplicates
+          if (prev.find(p => p.id === call.peer)) {
+            return prev;
+          }
+          return [...prev, { id: call.peer, stream: remoteStream }];
         });
-    }
-  }, [inCall]); // Run when inCall changes
-
-  // Leave video call
-  const leaveCall = () => {
-    // Stop all tracks
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        track.stop();
-        console.log('🛑 Stopped track:', track.kind);
       });
-    }
 
-    // Close all peer connections
-    peersRef.current.forEach(peerObj => {
-      if (peerObj.peer) {
-        peerObj.peer.destroy();
+      connectionsRef.current.push(call);
+    });
+
+    peer.on('error', (err) => {
+      console.error('❌ PeerJS error:', err);
+    });
+
+    return () => {
+      if (peerRef.current) {
+        peerRef.current.destroy();
+      }
+    };
+  }, [inCall, socket, roomId]);
+
+  // Handle socket events for peer connections
+  useEffect(() => {
+    if (!socket || !inCall) return;
+
+    // When another user joins the call
+    socket.on('user-joined-video-call', ({ peerId }) => {
+      console.log('📹 User joined, calling peer:', peerId);
+      
+      if (peerRef.current && localStreamRef.current) {
+        // Call the new peer
+        const call = peerRef.current.call(peerId, localStreamRef.current);
+        
+        if (call) {
+          call.on('stream', (remoteStream) => {
+            console.log('✅ Received stream from:', peerId);
+            
+            setRemotePeers(prev => {
+              if (prev.find(p => p.id === peerId)) {
+                return prev;
+              }
+              return [...prev, { id: peerId, stream: remoteStream }];
+            });
+          });
+
+          connectionsRef.current.push(call);
+        }
       }
     });
 
-    peersRef.current = [];
-    setPeers([]);
+    socket.on('user-left-video', ({ peerId }) => {
+      console.log('📹 Peer left:', peerId);
+      setRemotePeers(prev => prev.filter(p => p.id !== peerId));
+    });
+
+    return () => {
+      socket.off('user-joined-video-call');
+      socket.off('user-left-video');
+    };
+  }, [socket, inCall]);
+
+  const leaveCall = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+
+    connectionsRef.current.forEach(conn => conn.close());
+    if (peerRef.current) {
+      peerRef.current.destroy();
+    }
+
+    connectionsRef.current = [];
+    setRemotePeers([]);
     setInCall(false);
     setStreamReady(false);
 
-    // Notify server
     socket.emit('leave-video-call', { roomId });
-    
-    console.log('📹 Left video call');
   };
 
-  // Toggle video
   const toggleVideo = () => {
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         setVideoEnabled(videoTrack.enabled);
-        console.log('📹 Video:', videoTrack.enabled ? 'ON' : 'OFF');
       }
     }
   };
 
-  // Toggle audio
   const toggleAudio = () => {
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setAudioEnabled(audioTrack.enabled);
-        console.log('🎤 Audio:', audioTrack.enabled ? 'ON' : 'OFF');
       }
     }
   };
-  // Toggle fullscreen
-const toggleFullscreen = () => {
-  setIsFullscreen(!isFullscreen);
-  setIsExpanded(false); // Reset expanded when going fullscreen
-};
 
-// Exit fullscreen (for ESC key support)
-const exitFullscreen = () => {
-  setIsFullscreen(false);
-};
-
-// Handle ESC key to exit fullscreen
-useEffect(() => {
-  const handleEscape = (e) => {
-    if (e.key === 'Escape' && isFullscreen) {
-      exitFullscreen();
-    }
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen);
+    setIsExpanded(false);
   };
-  
-  window.addEventListener('keydown', handleEscape);
-  return () => window.removeEventListener('keydown', handleEscape);
-}, [isFullscreen]);
 
-  // Create peer connection
-  const createPeer = (userToSignal, callerID, stream) => {
-  console.log('Creating peer (initiator) for:', userToSignal);
-  
-  const peer = new Peer({
-    initiator: true,
-    trickle: false, // Don't trickle ICE candidates
-    stream: stream,
-    config: ICE_SERVERS
-  });
-
-  peer.on('signal', signal => {
-    console.log('Sending signal to:', userToSignal);
-    socket.emit('sending-signal', { 
-      userToSignal, 
-      callerID, 
-      signal 
-    });
-  });
-
-  peer.on('stream', remoteStream => {
-    console.log('Received remote stream from:', userToSignal);
-  });
-
-  peer.on('error', err => {
-    console.error('Peer error (initiator):', err);
-  });
-
-  peer.on('connect', () => {
-    console.log('Peer connected (initiator):', userToSignal);
-  });
-
-  peer.on('close', () => {
-    console.log('Peer connection closed:', userToSignal);
-  });
-
-  return peer;
-};
-
-// Add peer (RECEIVER)
-const addPeer = (incomingSignal, callerID, stream) => {
-  console.log('Adding peer (receiver) from:', callerID);
-  
-  const peer = new Peer({
-    initiator: false,
-    trickle: false,
-    stream: stream,
-    config: ICE_SERVERS
-  });
-
-  peer.on('signal', signal => {
-    console.log('Returning signal to:', callerID);
-    socket.emit('returning-signal', { 
-      signal, 
-      callerID 
-    });
-  });
-
-  peer.on('stream', remoteStream => {
-    console.log('Received remote stream from:', callerID);
-  });
-
-  peer.on('error', err => {
-    console.error('Peer error (receiver):', err);
-  });
-
-  peer.on('connect', () => {
-    console.log('Peer connected (receiver):', callerID);
-  });
-
-  peer.on('close', () => {
-    console.log('Peer connection closed:', callerID);
-  });
-
-  peer.signal(incomingSignal);
-
-  return peer;
-};
-
-
-// Socket event listeners
-useEffect(() => {
-  if (!socket || !inCall) return;
-
-  // When we receive list of users already in call
-  socket.on('all-users', ({ users }) => {
-    console.log('Received all-users:', users);
-    
-    if (!localStreamRef.current) {
-      console.error('No local stream available');
-      return;
-    }
-    
-    const newPeers = [];
-    users.forEach(user => {
-      console.log('Creating peer for user:', user.socketId || user);
-      const userId = user.socketId || user; // Handle both formats
-      
-      const peer = createPeer(userId, socket.id, localStreamRef.current);
-      
-      peersRef.current.push({
-        peerID: userId,
-        peer,
-      });
-      
-      newPeers.push({
-        peerID: userId,
-        peer,
-      });
-    });
-    
-    setPeers(newPeers);
-    console.log('Created', newPeers.length, 'peer connections');
-  });
-
-  // When another user joins the call
-  socket.on('user-joined-video', ({ signal, callerID }) => {
-    console.log('User joined video:', callerID);
-    
-    if (!localStreamRef.current) {
-      console.error('No local stream for incoming peer');
-      return;
-    }
-    
-    const peer = addPeer(signal, callerID, localStreamRef.current);
-    
-    peersRef.current.push({
-      peerID: callerID,
-      peer,
-    });
-
-    setPeers(prev => {
-      // Avoid duplicates
-      if (prev.find(p => p.peerID === callerID)) {
-        console.log('Peer already exists:', callerID);
-        return prev;
-      }
-      return [...prev, { peerID: callerID, peer }];
-    });
-  });
-
-  // When we receive answer from another peer
-  socket.on('receiving-returned-signal', ({ signal, id }) => {
-    console.log('Received returned signal from:', id);
-    
-    const item = peersRef.current.find(p => p.peerID === id);
-    if (item) {
-      console.log('Signaling peer:', id);
-      item.peer.signal(signal);
-    } else {
-      console.error('Peer not found for signal:', id);
-    }
-  });
-
-  // When a user leaves video call
-  socket.on('user-left-video', ({ userId }) => {
-    console.log('User left video:', userId);
-    
-    const peerObj = peersRef.current.find(p => p.peerID === userId);
-    if (peerObj) {
-      peerObj.peer.destroy();
-    }
-    
-    peersRef.current = peersRef.current.filter(p => p.peerID !== userId);
-    setPeers(prev => prev.filter(p => p.peerID !== userId));
-  });
-
-  return () => {
-    socket.off('all-users');
-    socket.off('user-joined-video');
-    socket.off('receiving-returned-signal');
-    socket.off('user-left-video');
+  const exitFullscreen = () => {
+    setIsFullscreen(false);
   };
-}, [socket, inCall]);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        exitFullscreen();
       }
-      peersRef.current.forEach(peerObj => {
-        if (peerObj.peer) {
-          peerObj.peer.destroy();
-        }
-      });
     };
-  }, []);
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isFullscreen]);
 
   if (!inCall) {
-    // Join Call Button
     return (
       <div className="bg-slate-800 border-t border-slate-700 p-3">
         <div className="flex items-center justify-between max-w-4xl mx-auto">
@@ -414,21 +237,20 @@ useEffect(() => {
             </div>
             <div>
               <p className="text-white font-medium text-sm">Video Call</p>
-              <p className="text-slate-400 text-xs">Click to test or join with camera</p>
+              <p className="text-slate-400 text-xs">Click to test or join</p>
             </div>
           </div>
           
           <div className="flex gap-2">
             <button
               onClick={testCamera}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
             >
-              🔍 Test
+              Test
             </button>
-            
             <button
               onClick={joinCall}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center gap-2 font-medium text-sm"
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 text-sm"
             >
               <Phone className="w-4 h-4" />
               Join Call
@@ -439,366 +261,127 @@ useEffect(() => {
     );
   }
 
-  // In Call UI
-return (
-  <div className={`bg-slate-800 border-t border-slate-700 transition-all duration-300 ${
-    isFullscreen 
-      ? 'fixed inset-0 z-50 h-screen' 
-      : isExpanded 
-      ? 'h-64'  // ← Changed from h-[500px] to h-64 (256px)
-      : 'h-auto'
-  }`}>
-    
-    {/* Fullscreen Overlay */}
-    {isFullscreen && (
-      <>
-        <div className="absolute inset-0 bg-slate-900"></div>
-        <button
-          onClick={exitFullscreen}
-          className="absolute top-4 right-4 z-10 p-2 bg-slate-800/90 hover:bg-slate-700 rounded-lg transition-colors backdrop-blur-sm"
-          title="Exit Fullscreen (ESC)"
-        >
-          <Minimize2 className="w-5 h-5 text-white" />
-        </button>
-      </>
-    )}
-    
-    <div className={`transition-all relative z-10 ${
-      isFullscreen 
-        ? 'p-4 max-w-full h-full flex flex-col' 
-        : isExpanded 
-        ? 'p-4 max-w-6xl mx-auto'
-        : 'p-2 max-w-6xl mx-auto'  // ← Smaller padding when collapsed
-    }`}>
-      
-      {/* Header - More Compact */}
-      <div className={`flex items-center justify-between ${isExpanded || isFullscreen ? 'mb-3' : 'mb-2'}`}>
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-          <Video className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'} text-green-400`} />
-          <span className={`text-white font-medium ${isExpanded || isFullscreen ? 'text-sm' : 'text-xs'}`}>
-            Live Call
-          </span>
-          <span className={`text-xs text-slate-400 bg-slate-700 px-2 py-0.5 rounded-full ${!isExpanded && !isFullscreen ? 'hidden sm:inline' : ''}`}>
-            {peers.length + 1} {peers.length === 0 ? 'participant' : 'participants'}
-          </span>
-          {isFullscreen && (
-            <span className="text-xs text-slate-500 ml-2">
-              Press ESC to exit fullscreen
-            </span>
-          )}
-        </div>
-        
-        <div className="flex items-center gap-2">
-          {!streamReady && !isFullscreen && (
-            <span className="text-xs text-yellow-400 hidden sm:inline">Loading...</span>
-          )}
-          
-          {/* Expand/Minimize */}
-          {/* {!isFullscreen && (
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-              title={isExpanded ? 'Minimize' : 'Expand'}
-            >
-              {isExpanded ? (
-                <Minimize2 className="w-4 h-4 text-slate-400" />
-              ) : (
-                <Maximize2 className="w-4 h-4 text-slate-400" />
-              )}
-            </button>
-          )} */}
-          
-          {/* Fullscreen Button */}
-          <button
-            onClick={toggleFullscreen}
-            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-            title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-4 h-4 text-purple-400" />
-            ) : (
-              <Maximize2 className="w-4 h-4 text-purple-400" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Video Grid - Compact when collapsed */}
-      <div className={`grid gap-2 ${
-        isFullscreen ? 'flex-1 mb-3' : 
-        isExpanded ? 'mb-3' : 
-        'mb-2'
-      } ${
-        isFullscreen ? '' : 
-        isExpanded ? '' : 
-        'max-h-32'  // ← Limit height when collapsed
-      } ${
-        peers.length === 0 ? 'grid-cols-1 max-w-md mx-auto' :
-        peers.length === 1 ? 'grid-cols-2' :
-        peers.length === 2 ? 'grid-cols-3' :
-        peers.length <= 4 ? 'grid-cols-4' :
-        peers.length <= 6 ? 'grid-cols-6' :  // ← More columns for compact view
-        'grid-cols-7'
-      }`}>
-        
-        {/* Local Video - Smaller when not expanded */}
-        <div className={`relative bg-slate-900 rounded-lg overflow-hidden shadow-lg ${
-          isExpanded || isFullscreen ? 'aspect-video' : 'aspect-video h-28'  // ← Fixed small height
-        }`}>
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            className={`w-full h-full object-cover ${!streamReady ? 'opacity-0' : 'opacity-100'} transition-opacity`}
-          />
-          
-          {/* Loading State */}
-          {!streamReady && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-              <div className="text-center">
-                <div className={`${isExpanded || isFullscreen ? 'w-12 h-12' : 'w-6 h-6'} border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2`}></div>
-                {(isExpanded || isFullscreen) && (
-                  <p className="text-slate-400 text-xs">Loading camera...</p>
-                )}
-              </div>
-            </div>
-          )}
-          
-          {/* Name Tag - Smaller when collapsed */}
-          <div className={`absolute bottom-1 left-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1 ${
-            isExpanded || isFullscreen ? 'text-xs' : 'text-[10px]'
-          } text-white`}>
-            <User className={`${isExpanded || isFullscreen ? 'w-3 h-3' : 'w-2 h-2'}`} />
-            <span>{isExpanded || isFullscreen ? `${username} (You)` : 'You'}</span>
-          </div>
-          
-          {/* Camera Off Overlay */}
-          {!videoEnabled && streamReady && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
-              <div className={`${isExpanded || isFullscreen ? 'w-16 h-16' : 'w-8 h-8'} bg-slate-700 rounded-full flex items-center justify-center mb-2`}>
-                <User className={`${isExpanded || isFullscreen ? 'w-8 h-8' : 'w-4 h-4'} text-slate-400`} />
-              </div>
-              {(isExpanded || isFullscreen) && (
-                <>
-                  <VideoOff className="w-6 h-6 text-slate-500 mb-1" />
-                  <span className="text-slate-400 text-xs">Camera Off</span>
-                </>
-              )}
-            </div>
-          )}
-          
-          {/* Status Indicators - Only show when expanded */}
-          {(isExpanded || isFullscreen) && (
-            <div className="absolute top-2 right-2 flex gap-1">
-              {!videoEnabled && (
-                <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
-                  <VideoOff className="w-3 h-3 text-white" />
-                </div>
-              )}
-              {!audioEnabled && (
-                <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
-                  <MicOff className="w-3 h-3 text-white" />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Remote Videos - Smaller when not expanded */}
-        {peers.map((peerObj, index) => (
-          <RemoteVideoCompact 
-            key={peerObj.peerID} 
-            peer={peerObj.peer} 
-            index={index}
-            isExpanded={isExpanded || isFullscreen}
-          />
-        ))}
-      </div>
-
-      {/* Controls - More Compact */}
-      <div className="flex items-center justify-center gap-2">
-        
-        {/* Toggle Video */}
-        <button
-          onClick={toggleVideo}
-          className={`rounded-lg transition-all ${
-            isExpanded || isFullscreen ? 'p-3' : 'p-2'
-          } ${
-            videoEnabled 
-              ? 'bg-slate-700 hover:bg-slate-600 text-white' 
-              : 'bg-red-600 hover:bg-red-700 text-white'
-          }`}
-          title={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
-        >
-          {videoEnabled ? (
-            <Video className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
-          ) : (
-            <VideoOff className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
-          )}
-        </button>
-
-        {/* Toggle Audio */}
-        <button
-          onClick={toggleAudio}
-          className={`rounded-lg transition-all ${
-            isExpanded || isFullscreen ? 'p-3' : 'p-2'
-          } ${
-            audioEnabled 
-              ? 'bg-slate-700 hover:bg-slate-600 text-white' 
-              : 'bg-red-600 hover:bg-red-700 text-white'
-          }`}
-          title={audioEnabled ? 'Mute microphone' : 'Unmute microphone'}
-        >
-          {audioEnabled ? (
-            <Mic className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
-          ) : (
-            <MicOff className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
-          )}
-        </button>
-
-        {/* Leave Call */}
-        <button
-          onClick={leaveCall}
-          className={`bg-red-600 hover:bg-red-700 text-white rounded-lg transition-all flex items-center gap-2 ${
-            isExpanded || isFullscreen ? 'p-3 px-4' : 'p-2 px-3'
-          }`}
-          title="Leave call"
-        >
-          <PhoneOff className={`${isExpanded || isFullscreen ? 'w-5 h-5' : 'w-4 h-4'}`} />
-          {(isExpanded || isFullscreen) && (
-            <span className="text-sm font-medium">Leave</span>
-          )}
-        </button>
-      </div>
-    </div>
-  </div>
-);
-}
-
-// Remote Video Component
-// Remote Video Component - WITH DEBUG INFO
-function RemoteVideo({ peer, index }) {
-  const ref = useRef();
-  const [hasStream, setHasStream] = useState(false);
-  const [connectionState, setConnectionState] = useState('connecting');
-
-  useEffect(() => {
-    peer.on('stream', stream => {
-      console.log('📹 Received remote stream for peer', index);
-      if (ref.current) {
-        ref.current.srcObject = stream;
-        setHasStream(true);
-      }
-    });
-
-    peer.on('connect', () => {
-      console.log('✅ Peer', index, 'connected');
-      setConnectionState('connected');
-    });
-
-    peer.on('close', () => {
-      console.log('❌ Peer', index, 'closed');
-      setConnectionState('closed');
-    });
-
-    peer.on('error', (err) => {
-      console.error('❌ Peer', index, 'error:', err);
-      setConnectionState('error');
-    });
-
-    return () => {
-      peer.off('stream');
-      peer.off('connect');
-      peer.off('close');
-      peer.off('error');
-    };
-  }, [peer, index]);
-
   return (
-    <div className={`relative bg-slate-900 rounded-lg overflow-hidden shadow-lg ${
-      isExpanded ? 'aspect-video' : 'aspect-video h-28'
+    <div className={`bg-slate-800 border-t border-slate-700 transition-all ${
+      isFullscreen ? 'fixed inset-0 z-50 h-screen' : 
+      isExpanded ? 'h-64' : 'h-auto'
     }`}>
-      <video 
-        ref={ref} 
-        autoPlay 
-        playsInline 
-        className={`w-full h-full object-cover ${!hasStream ? 'opacity-0' : 'opacity-100'} transition-opacity`}
-      />
       
-      {!hasStream && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
-          <div className={`${isExpanded ? 'w-12 h-12' : 'w-6 h-6'} border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-2`}></div>
-          {isExpanded && (
-            <>
-              <p className="text-slate-400 text-xs">Connecting...</p>
-              <p className="text-slate-500 text-[10px] mt-1">{connectionState}</p>
-            </>
-          )}
-        </div>
+      {isFullscreen && (
+        <>
+          <div className="absolute inset-0 bg-slate-900"></div>
+          <button
+            onClick={exitFullscreen}
+            className="absolute top-4 right-4 z-10 p-2 bg-slate-800/90 rounded-lg"
+          >
+            <Minimize2 className="w-5 h-5 text-white" />
+          </button>
+        </>
       )}
       
-      <div className={`absolute bottom-1 left-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1 ${
-        isExpanded ? 'text-xs' : 'text-[10px]'
-      } text-white`}>
-        <User className={`${isExpanded ? 'w-3 h-3' : 'w-2 h-2'}`} />
-        <span>{isExpanded ? `Participant ${index + 1}` : `P${index + 1}`}</span>
-        {/* Debug status indicator */}
-        <span className={`ml-1 w-1.5 h-1.5 rounded-full ${
-          hasStream ? 'bg-green-400' : 'bg-yellow-400'
-        }`}></span>
+      <div className={`transition-all relative z-10 ${
+        isFullscreen ? 'p-4 h-full flex flex-col' : 
+        isExpanded ? 'p-4' : 'p-2'
+      }`}>
+        
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <Video className="w-4 h-4 text-green-400" />
+            <span className="text-white text-xs">Live ({remotePeers.length + 1})</span>
+          </div>
+          
+          <div className="flex gap-2">
+            {!isFullscreen && (
+              <button onClick={() => setIsExpanded(!isExpanded)} className="p-1 hover:bg-slate-700 rounded">
+                {isExpanded ? <Minimize2 className="w-4 h-4 text-slate-400" /> : <Maximize2 className="w-4 h-4 text-slate-400" />}
+              </button>
+            )}
+            <button onClick={toggleFullscreen} className="p-1 hover:bg-slate-700 rounded">
+              <Maximize2 className="w-4 h-4 text-purple-400" />
+            </button>
+          </div>
+        </div>
+
+        <div className={`grid gap-2 mb-2 ${
+          remotePeers.length === 0 ? 'grid-cols-1 max-w-md mx-auto' :
+          remotePeers.length === 1 ? 'grid-cols-2' :
+          'grid-cols-3'
+        } ${isFullscreen ? 'flex-1' : isExpanded ? '' : 'max-h-32'}`}>
+          
+          {/* Local Video */}
+          <div className={`relative bg-slate-900 rounded-lg overflow-hidden ${
+            isExpanded || isFullscreen ? 'aspect-video' : 'aspect-video h-28'
+          }`}>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+              className={`w-full h-full object-cover ${!streamReady ? 'opacity-0' : 'opacity-100'}`}
+            />
+            
+            {!streamReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+                <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            )}
+            
+            <div className="absolute bottom-1 left-1 bg-black/70 px-2 py-1 rounded text-xs text-white">
+              <User className="w-3 h-3 inline mr-1" />
+              You
+            </div>
+            
+            {!videoEnabled && streamReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+                <VideoOff className="w-8 h-8 text-slate-600" />
+              </div>
+            )}
+          </div>
+
+          {/* Remote Videos */}
+          {remotePeers.map((peer, idx) => (
+            <RemoteVideoPeerJS key={peer.id} stream={peer.stream} index={idx} isExpanded={isExpanded || isFullscreen} />
+          ))}
+        </div>
+
+        <div className="flex items-center justify-center gap-2">
+          <button onClick={toggleVideo} className={`p-2 rounded-lg ${videoEnabled ? 'bg-slate-700' : 'bg-red-600'}`}>
+            {videoEnabled ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
+          </button>
+          <button onClick={toggleAudio} className={`p-2 rounded-lg ${audioEnabled ? 'bg-slate-700' : 'bg-red-600'}`}>
+            {audioEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+          </button>
+          <button onClick={leaveCall} className="p-2 px-4 bg-red-600 rounded-lg flex items-center gap-2">
+            <PhoneOff className="w-4 h-4" />
+            {(isExpanded || isFullscreen) && <span className="text-sm">Leave</span>}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
-// Compact Remote Video Component
-// function RemoteVideoCompact({ peer, index, isExpanded }) {
-//   const ref = useRef();
-//   const [hasStream, setHasStream] = useState(false);
 
-//   useEffect(() => {
-//     peer.on('stream', stream => {
-//       console.log('📹 Received remote stream for peer', index);
-//       if (ref.current) {
-//         ref.current.srcObject = stream;
-//         setHasStream(true);
-//       }
-//     });
+function RemoteVideoPeerJS({ stream, index, isExpanded }) {
+  const ref = useRef();
 
-//     return () => {
-//       peer.off('stream');
-//     };
-//   }, [peer, index]);
+  useEffect(() => {
+    if (ref.current && stream) {
+      ref.current.srcObject = stream;
+    }
+  }, [stream]);
 
-//   return (
-//     <div className={`relative bg-slate-900 rounded-lg overflow-hidden shadow-lg ${
-//       isExpanded ? 'aspect-video' : 'aspect-video h-28'
-//     }`}>
-//       <video 
-//         ref={ref} 
-//         autoPlay 
-//         playsInline 
-//         className={`w-full h-full object-cover ${!hasStream ? 'opacity-0' : 'opacity-100'} transition-opacity`}
-//       />
-      
-//       {!hasStream && (
-//         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
-//           <div className={`${isExpanded ? 'w-12 h-12' : 'w-6 h-6'} border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-2`}></div>
-//           {isExpanded && (
-//             <p className="text-slate-400 text-xs">Connecting...</p>
-//           )}
-//         </div>
-//       )}
-      
-//       <div className={`absolute bottom-1 left-1 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1 ${
-//         isExpanded ? 'text-xs' : 'text-[10px]'
-//       } text-white`}>
-//         <User className={`${isExpanded ? 'w-3 h-3' : 'w-2 h-2'}`} />
-//         <span>{isExpanded ? `Participant ${index + 1}` : `P${index + 1}`}</span>
-//       </div>
-//     </div>
-//   );
-// }
+  return (
+    <div className={`relative bg-slate-900 rounded-lg overflow-hidden ${
+      isExpanded ? 'aspect-video' : 'aspect-video h-28'
+    }`}>
+      <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
+      <div className="absolute bottom-1 left-1 bg-black/70 px-2 py-1 rounded text-xs text-white">
+        <User className="w-2 h-2 inline mr-1" />
+        P{index + 1}
+      </div>
+    </div>
+  );
+}
 
 export default VideoCall;
