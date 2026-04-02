@@ -3,8 +3,16 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
+import Room from './src/models/Room.js';
 
 dotenv.config();
+
+// Connect to MongoDB
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/codershub';
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
 const app = express();
 
@@ -80,16 +88,43 @@ const io = new Server(httpServer, {
 
 // DATA STORAGE
 
-const rooms = new Map();
+const activeRooms = new Map(); // roomId -> { users: Map(socketId -> user), isFirstUser: boolean }
 
 // REST API ENDPOINTS
+
+// Delete room endpoint
+app.delete('/api/rooms/:roomId', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { username } = req.body; // Assume username is sent in body
+    
+    const room = await Room.findOne({ roomId: roomId.toUpperCase() });
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    
+    if (room.adminUsername !== username) {
+      return res.status(403).json({ error: 'Only the admin can delete the room' });
+    }
+    
+    await Room.deleteOne({ roomId: roomId.toUpperCase() });
+    
+    // Notify users in the room
+    io.to(roomId).emit('room-deleted', { message: 'Room has been deleted by admin' });
+    
+    res.json({ success: true, message: 'Room deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting room:', error);
+    res.status(500).json({ error: 'Failed to delete room' });
+  }
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'Server is running',
-    activeRooms: rooms.size,
+    activeRooms: activeRooms.size,
     aiProvider: 'Groq (FREE)',
     timestamp: new Date().toISOString()
   });
@@ -232,64 +267,97 @@ app.post('/api/execute-code', async (req, res) => {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
   
-  socket.on('join-room', ({ roomId, username }) => {
-    console.log(` ${username} joining room: ${roomId}`);
-    socket.join(roomId);
-    
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, {
-        code: '// Welcome to the collaborative editor!\n// Start coding together...\n\n',
-        language: 'javascript',
-        users: new Map(),
-        chatHistory: [],
-        createdAt: new Date()
+  socket.on('join-room', async ({ roomId, username }) => {
+    try {
+      console.log(` ${username} joining room: ${roomId}`);
+      socket.join(roomId);
+      
+      let room = await Room.findOne({ roomId: roomId.toUpperCase() });
+      let isFirstUser = false;
+      
+      if (!room) {
+        // Create new room
+        room = new Room({
+          roomId: roomId.toUpperCase(),
+          adminUsername: username
+        });
+        await room.save();
+        isFirstUser = true;
+        console.log(`Created new room: ${roomId} with admin: ${username}`);
+      }
+      
+      // Initialize active room if not exists
+      if (!activeRooms.has(roomId)) {
+        activeRooms.set(roomId, {
+          users: new Map(),
+          isFirstUser: isFirstUser
+        });
+      }
+      
+      const activeRoom = activeRooms.get(roomId);
+      activeRoom.users.set(socket.id, { username, socketId: socket.id });
+      
+      socket.emit('room-state', {
+        code: room.code,
+        language: room.language,
+        users: Array.from(activeRoom.users.values()),
+        chatHistory: room.chatHistory,
+        isAdmin: username === room.adminUsername
       });
-    }
-    
-    const room = rooms.get(roomId);
-    room.users.set(socket.id, { username, socketId: socket.id });
-    
-    socket.emit('room-state', {
-      code: room.code,
-      language: room.language,
-      users: Array.from(room.users.values()),
-      chatHistory: room.chatHistory
-    });
-    
-    socket.to(roomId).emit('user-joined', {
-      username,
-      socketId: socket.id,
-      users: Array.from(room.users.values())
-    });
-  });
-
-  socket.on('code-change', ({ roomId, code }) => {
-    const room = rooms.get(roomId);
-    if (room) {
-      room.code = code;
-      socket.to(roomId).emit('code-update', { code });
-    }
-  });
-
-  socket.on('language-change', ({ roomId, language }) => {
-    const room = rooms.get(roomId);
-    if (room) {
-      room.language = language;
-      io.to(roomId).emit('language-update', { language });
-    }
-  });
-
-  socket.on('chat-message', ({ roomId, message, username }) => {
-    const room = rooms.get(roomId);
-    if (room) {
-      const chatMessage = {
-        id: Date.now(),
+      
+      socket.to(roomId).emit('user-joined', {
         username,
-        message,
-        timestamp: new Date()
-      };
-      room.chatHistory.push(chatMessage);
-      io.to(roomId).emit('new-message', chatMessage);
+        socketId: socket.id,
+        users: Array.from(activeRoom.users.values())
+      });
+    } catch (error) {
+      console.error('Error joining room:', error);
+      socket.emit('error', { message: 'Failed to join room' });
+    }
+  });
+
+  socket.on('code-change', async ({ roomId, code }) => {
+    try {
+      const room = await Room.findOne({ roomId: roomId.toUpperCase() });
+      if (room) {
+        room.code = code;
+        await room.save();
+        socket.to(roomId).emit('code-update', { code });
+      }
+    } catch (error) {
+      console.error('Error saving code:', error);
+    }
+  });
+
+  socket.on('language-change', async ({ roomId, language }) => {
+    try {
+      const room = await Room.findOne({ roomId: roomId.toUpperCase() });
+      if (room) {
+        room.language = language;
+        await room.save();
+        io.to(roomId).emit('language-update', { language });
+      }
+    } catch (error) {
+      console.error('Error saving language:', error);
+    }
+  });
+
+  socket.on('chat-message', async ({ roomId, message, username }) => {
+    try {
+      const room = await Room.findOne({ roomId: roomId.toUpperCase() });
+      if (room) {
+        const chatMessage = {
+          id: Date.now(),
+          username,
+          message,
+          timestamp: new Date()
+        };
+        room.chatHistory.push(chatMessage);
+        await room.save();
+        io.to(roomId).emit('new-message', chatMessage);
+      }
+    } catch (error) {
+      console.error('Error saving chat message:', error);
     }
   });
 
@@ -297,8 +365,8 @@ io.on('connection', (socket) => {
 socket.on('join-video-call', ({ roomId, peerId }) => {
   console.log(` ${peerId} joining video call in room ${roomId}`);
   
-  const room = rooms.get(roomId);
-  if (room) {
+  const activeRoom = activeRooms.get(roomId);
+  if (activeRoom) {
     // Notify all other users about the new peer
     socket.to(roomId).emit('user-joined-video-call', { peerId });
   }
@@ -331,21 +399,21 @@ socket.on('leave-video-call', ({ roomId }) => {
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
-    rooms.forEach((room, roomId) => {
-      if (room.users.has(socket.id)) {
-        const user = room.users.get(socket.id);
-        room.users.delete(socket.id);
+    activeRooms.forEach((activeRoom, roomId) => {
+      if (activeRoom.users.has(socket.id)) {
+        const user = activeRoom.users.get(socket.id);
+        activeRoom.users.delete(socket.id);
         
         io.to(roomId).emit('user-left', {
           socketId: socket.id,
           username: user.username,
-          users: Array.from(room.users.values())
+          users: Array.from(activeRoom.users.values())
         });
         
         io.to(roomId).emit('user-left-video', { userId: socket.id });
         
-        if (room.users.size === 0) {
-          rooms.delete(roomId);
+        if (activeRoom.users.size === 0) {
+          activeRooms.delete(roomId);
         }
       }
     });

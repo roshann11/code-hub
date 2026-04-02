@@ -24,6 +24,9 @@ function EditorRoom({ roomId, username }) {
   const [language, setLanguage] = useState('javascript');
   const isRemoteChange = useRef(false);
 
+  // Admin state
+  const [isAdmin, setIsAdmin] = useState(false);
+
   // UI state
   const [showChat, setShowChat] = useState(false);
 
@@ -45,11 +48,12 @@ function EditorRoom({ roomId, username }) {
     });
 
     // Room events
-    newSocket.on('room-state', ({ code: roomCode, language: roomLanguage, users: roomUsers }) => {
+    newSocket.on('room-state', ({ code: roomCode, language: roomLanguage, users: roomUsers, isAdmin: admin }) => {
       console.log('Received room state');
       setCode(roomCode);
       setLanguage(roomLanguage);
       setUsers(roomUsers);
+      setIsAdmin(admin);
     });
 
     newSocket.on('user-joined', ({ username: newUser, users: updatedUsers }) => {
@@ -72,6 +76,11 @@ function EditorRoom({ roomId, username }) {
     newSocket.on('language-update', ({ language: newLanguage }) => {
       console.log('Language updated to:', newLanguage);
       setLanguage(newLanguage);
+    });
+
+    newSocket.on('room-deleted', ({ message }) => {
+      alert(message);
+      window.location.href = '/'; // Redirect to home
     });
 
     // Cleanup
@@ -136,6 +145,26 @@ function EditorRoom({ roomId, username }) {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  };
+
+  const deleteRoom = async () => {
+    if (!confirm('Are you sure you want to delete this room? This action cannot be undone.')) return;
+    
+    try {
+      const response = await fetch(`${SOCKET_URL}/api/rooms/${roomId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.error || 'Failed to delete room');
+      }
+    } catch (error) {
+      console.error('Error deleting room:', error);
+      alert('Failed to delete room');
+    }
   };
 
   return (
@@ -242,6 +271,18 @@ function EditorRoom({ roomId, username }) {
   <Video className="w-4 h-4" />
   <span className="hidden md:inline">Video</span>
 </button>
+
+          {/* Delete Room (Admin only) */}
+          {isAdmin && (
+            <button
+              onClick={deleteRoom}
+              className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg transition-colors text-white text-sm"
+              title="Delete room (Admin only)"
+            >
+              <X className="w-4 h-4" />
+              <span className="hidden md:inline">Delete Room</span>
+            </button>
+          )}
 
           {/* Connection indicator */}
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded-lg">
