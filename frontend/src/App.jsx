@@ -1,12 +1,53 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import RoomJoin from './components/room/RoomJoin';
 import EditorRoom from './pages/EditorRoom';
 
+const SESSION_KEY = 'coders-hub-session';
+
+function readStoredSession() {
+  if (typeof window === 'undefined') {
+    return { stage: 'join', roomId: '', username: '' };
+  }
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return { stage: 'join', roomId: '', username: '' };
+    const data = JSON.parse(raw);
+    const roomId =
+      typeof data.roomId === 'string' ? data.roomId.trim().toUpperCase() : '';
+    const username =
+      typeof data.username === 'string' ? data.username.trim() : '';
+    if (data.stage === 'editor' && roomId && username) {
+      return { stage: 'editor', roomId, username };
+    }
+  } catch {
+    /* ignore corrupt storage */
+  }
+  return { stage: 'join', roomId: '', username: '' };
+}
+
+const initialSession = readStoredSession();
+
 function App() {
-  const [stage, setStage] = useState('join'); // 'join' or 'editor'
-  const [roomId, setRoomId] = useState('');
-  const [username, setUsername] = useState('');
-  
+  const [stage, setStage] = useState(initialSession.stage); // 'join' or 'editor'
+  const [roomId, setRoomId] = useState(initialSession.roomId);
+  const [username, setUsername] = useState(initialSession.username);
+
+  // Keep tab refresh in the editor; cleared when leaving the room or not in editor
+  useEffect(() => {
+    if (stage === 'editor' && roomId.trim() && username.trim()) {
+      sessionStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          stage: 'editor',
+          roomId: roomId.trim().toUpperCase(),
+          username: username.trim(),
+        })
+      );
+    } else {
+      sessionStorage.removeItem(SESSION_KEY);
+    }
+  }, [stage, roomId, username]);
+
   const handleJoinRoom = () => {
     if (roomId.trim() && username.trim()) {
       setStage('editor');

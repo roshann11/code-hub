@@ -80,6 +80,11 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
 
     newSocket.on('room-deleted', ({ message }) => {
       alert(message);
+      try {
+        sessionStorage.removeItem('coders-hub-session');
+      } catch {
+        /* ignore */
+      }
       window.location.href = '/'; // Redirect to home
     });
 
