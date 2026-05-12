@@ -19,6 +19,11 @@ function App() {
     setRoomId(newRoomId);
   };
 
+  const handleLeaveRoom = () => {
+    setStage('join');
+    setRoomId('');
+  };
+
   // Show join screen
   if (stage === 'join') {
     return (
@@ -34,7 +39,13 @@ function App() {
   }
 
   // Show editor room
-  return <EditorRoom roomId={roomId} username={username} />;
+  return (
+    <EditorRoom
+      roomId={roomId}
+      username={username}
+      onLeaveRoom={handleLeaveRoom}
+    />
+  );
 }
 
 export default App;

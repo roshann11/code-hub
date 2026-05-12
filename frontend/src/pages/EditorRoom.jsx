@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video, Play} from 'lucide-react';
+import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video, Play, LogOut } from 'lucide-react';
 import { io } from 'socket.io-client';
 import CodeEditor from '../components/editor/CodeEditor';
 import LanguageSelector from '../components/editor/LanguageSelector';
@@ -10,7 +10,7 @@ import CodeOutput from '../components/editor/CodeOutput';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-function EditorRoom({ roomId, username }) {
+function EditorRoom({ roomId, username, onLeaveRoom }) {
   const [socket, setSocket] = useState(null);
   const [users, setUsers] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -147,6 +147,11 @@ function EditorRoom({ roomId, username }) {
     window.URL.revokeObjectURL(url);
   };
 
+  const leaveRoom = () => {
+    if (!confirm('Leave this room? You can join again later with the room code.')) return;
+    onLeaveRoom?.();
+  };
+
   const deleteRoom = async () => {
     if (!confirm('Are you sure you want to delete this room? This action cannot be undone.')) return;
     
@@ -271,6 +276,17 @@ function EditorRoom({ roomId, username }) {
   <Video className="w-4 h-4" />
   <span className="hidden md:inline">Video</span>
 </button>
+
+          {/* Leave Room — available to everyone */}
+          <button
+            type="button"
+            onClick={leaveRoom}
+            className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-white text-sm"
+            title="Leave room"
+          >
+            <LogOut className="w-4 h-4" />
+            <span className="hidden md:inline">Leave Room</span>
+          </button>
 
           {/* Delete Room (Admin only) */}
           {isAdmin && (
