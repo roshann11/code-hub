@@ -8,6 +8,68 @@ import Room from './src/models/Room.js';
 
 dotenv.config();
 
+const MAIN_BY_LANG = {
+  javascript: 'main.js',
+  typescript: 'main.ts',
+  python: 'main.py',
+  java: 'Main.java',
+  cpp: 'main.cpp',
+  c: 'main.c',
+  csharp: 'Program.cs',
+  go: 'main.go',
+  rust: 'main.rs',
+  php: 'main.php',
+  ruby: 'main.rb',
+  html: 'index.html',
+  css: 'styles.css',
+  json: 'data.json',
+  markdown: 'README.md',
+  sql: 'query.sql',
+};
+
+function defaultMainPath(language) {
+  return MAIN_BY_LANG[language] || 'main.txt';
+}
+
+function sanitizePath(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  const trimmed = raw.trim().replace(/\\/g, '/');
+  if (!trimmed || trimmed.includes('..')) return '';
+  if (!/^[a-zA-Z0-9._\-/]+$/.test(trimmed)) return '';
+  const parts = trimmed.split('/').filter(Boolean);
+  if (parts.some((p) => p === '.' || p === '..')) return '';
+  return parts.join('/');
+}
+
+function normalizeIncomingFiles(files) {
+  if (!Array.isArray(files)) return null;
+  const out = [];
+  for (const f of files) {
+    const path = sanitizePath(f?.path);
+    if (!path) continue;
+    out.push({
+      path,
+      content: typeof f?.content === 'string' ? f.content : '',
+    });
+  }
+  return out.length ? out : null;
+}
+
+/** Migrate legacy `code` field into `files` when needed. */
+async function ensureRoomFiles(room) {
+  if (room.files?.length) return room;
+  const lang = room.language || 'javascript';
+  const path = defaultMainPath(lang);
+  const content =
+    room.code != null && String(room.code).length > 0
+      ? room.code
+      : '// Welcome to the collaborative editor!\n';
+  room.files = [{ path, content }];
+  room.markModified('files');
+  await room.save();
+  return room;
+}
+
 // Connect to MongoDB
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/codershub';
 mongoose.connect(MONGODB_URI)
@@ -108,9 +170,10 @@ app.delete('/api/rooms/:roomId', async (req, res) => {
     }
     
     await Room.deleteOne({ roomId: roomId.toUpperCase() });
-    
+
+    const roomKey = roomId.toUpperCase();
     // Notify users in the room
-    io.to(roomId).emit('room-deleted', { message: 'Room has been deleted by admin' });
+    io.to(roomKey).emit('room-deleted', { message: 'Room has been deleted by admin' });
     
     res.json({ success: true, message: 'Room deleted successfully' });
   } catch (error) {
@@ -135,10 +198,23 @@ app.get('/api/health', (req, res) => {
 // ============================================
 app.post('/api/ai-assist', async (req, res) => {
   try {
-    const { code, question } = req.body;
-    
+    const { code, question, files } = req.body;
+
     if (!question || !question.trim()) {
       return res.status(400).json({ error: 'Question is required' });
+    }
+
+    let codeBlock = '';
+    if (Array.isArray(files) && files.length > 0) {
+      const normalized = normalizeIncomingFiles(files);
+      if (normalized?.length) {
+        codeBlock = normalized
+          .map((f) => `// --- ${f.path} ---\n${f.content}`)
+          .join('\n\n');
+      }
+    }
+    if (!codeBlock && typeof code === 'string') {
+      codeBlock = code;
     }
 
     if (!process.env.GROQ_API_KEY) {
@@ -165,7 +241,7 @@ app.post('/api/ai-assist', async (req, res) => {
           },
           {
             role: 'user',
-            content: `Code:\n\`\`\`\n${code || 'No code provided'}\n\`\`\`\n\nQuestion: ${question}`
+            content: `Project files:\n\`\`\`\n${codeBlock || 'No code provided'}\n\`\`\`\n\nQuestion: ${question}`
           }
         ],
         temperature: 0.7,
@@ -203,28 +279,72 @@ app.post('/api/ai-assist', async (req, res) => {
 
 app.post('/api/execute-code', async (req, res) => {
   try {
-    const { code, language } = req.body;
-    
-    if (!code || !code.trim()) {
-      return res.status(400).json({ error: 'Code is required' });
-    }
+    const { code, language, files, entryPath } = req.body;
 
     const languageMap = {
-      'javascript': 'javascript',
-      'typescript': 'typescript',
-      'python': 'python',
-      'java': 'java',
-      'cpp': 'cpp',
-      'c': 'c',
-      'csharp': 'csharp',
-      'go': 'go',
-      'rust': 'rust',
-      'php': 'php',
-      'ruby': 'ruby',
-      'sql': 'sqlite3'
+      javascript: 'javascript',
+      typescript: 'typescript',
+      python: 'python',
+      java: 'java',
+      cpp: 'cpp',
+      c: 'c',
+      csharp: 'csharp',
+      go: 'go',
+      rust: 'rust',
+      php: 'php',
+      ruby: 'ruby',
+      sql: 'sqlite3',
     };
 
-    const pistonLanguage = languageMap[language] || language;
+    let pistonLanguage = languageMap[language] || language;
+    let pistonFiles;
+
+    if (Array.isArray(files) && files.length > 0) {
+      const normalized = normalizeIncomingFiles(files);
+      if (!normalized?.length) {
+        return res.status(400).json({ error: 'No valid files to execute' });
+      }
+      const entry =
+        normalized.find((f) => f.path === entryPath) || normalized[0];
+      const ext = entry.path.includes('.')
+        ? entry.path.slice(entry.path.lastIndexOf('.')).toLowerCase()
+        : '';
+      const extLang =
+        {
+          '.js': 'javascript',
+          '.mjs': 'javascript',
+          '.cjs': 'javascript',
+          '.ts': 'typescript',
+          '.tsx': 'typescript',
+          '.py': 'python',
+          '.java': 'java',
+          '.cpp': 'cpp',
+          '.cc': 'cpp',
+          '.cxx': 'cpp',
+          '.c': 'c',
+          '.cs': 'csharp',
+          '.go': 'go',
+          '.rs': 'rust',
+          '.php': 'php',
+          '.rb': 'ruby',
+          '.sql': 'sqlite3',
+        }[ext] || null;
+      if (extLang) pistonLanguage = languageMap[extLang] || extLang;
+
+      const ordered = [
+        ...normalized.filter((f) => f.path === entry.path),
+        ...normalized.filter((f) => f.path !== entry.path),
+      ];
+      pistonFiles = ordered.map((f) => ({
+        name: f.path.replace(/\\/g, '/'),
+        content: f.content,
+      }));
+    } else {
+      if (!code || !String(code).trim()) {
+        return res.status(400).json({ error: 'Code is required' });
+      }
+      pistonFiles = [{ name: 'main', content: code }];
+    }
 
     const response = await fetch('https://emkc.org/api/v2/piston/execute', {
       method: 'POST',
@@ -232,12 +352,12 @@ app.post('/api/execute-code', async (req, res) => {
       body: JSON.stringify({
         language: pistonLanguage,
         version: '*',
-        files: [{ name: 'main', content: code }],
+        files: pistonFiles,
         stdin: '',
         args: [],
         compile_timeout: 10000,
-        run_timeout: 3000
-      })
+        run_timeout: 3000,
+      }),
     });
 
     const data = await response.json();
@@ -269,46 +389,49 @@ io.on('connection', (socket) => {
   
   socket.on('join-room', async ({ roomId, username }) => {
     try {
-      console.log(` ${username} joining room: ${roomId}`);
-      socket.join(roomId);
-      
-      let room = await Room.findOne({ roomId: roomId.toUpperCase() });
+      const roomKey = String(roomId || '').trim().toUpperCase();
+      if (!roomKey) return;
+
+      console.log(` ${username} joining room: ${roomKey}`);
+      socket.join(roomKey);
+
+      let room = await Room.findOne({ roomId: roomKey });
       let isFirstUser = false;
-      
+
       if (!room) {
-        // Create new room
         room = new Room({
-          roomId: roomId.toUpperCase(),
-          adminUsername: username
+          roomId: roomKey,
+          adminUsername: username,
         });
         await room.save();
         isFirstUser = true;
-        console.log(`Created new room: ${roomId} with admin: ${username}`);
+        console.log(`Created new room: ${roomKey} with admin: ${username}`);
       }
-      
-      // Initialize active room if not exists
-      if (!activeRooms.has(roomId)) {
-        activeRooms.set(roomId, {
+
+      room = await ensureRoomFiles(room);
+
+      if (!activeRooms.has(roomKey)) {
+        activeRooms.set(roomKey, {
           users: new Map(),
-          isFirstUser: isFirstUser
+          isFirstUser,
         });
       }
-      
-      const activeRoom = activeRooms.get(roomId);
+
+      const activeRoom = activeRooms.get(roomKey);
       activeRoom.users.set(socket.id, { username, socketId: socket.id });
-      
+
       socket.emit('room-state', {
-        code: room.code,
+        files: room.files,
         language: room.language,
         users: Array.from(activeRoom.users.values()),
         chatHistory: room.chatHistory,
-        isAdmin: username === room.adminUsername
+        isAdmin: username === room.adminUsername,
       });
-      
-      socket.to(roomId).emit('user-joined', {
+
+      socket.to(roomKey).emit('user-joined', {
         username,
         socketId: socket.id,
-        users: Array.from(activeRoom.users.values())
+        users: Array.from(activeRoom.users.values()),
       });
     } catch (error) {
       console.error('Error joining room:', error);
@@ -316,26 +439,33 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('code-change', async ({ roomId, code }) => {
+  socket.on('files-change', async ({ roomId, files }) => {
     try {
-      const room = await Room.findOne({ roomId: roomId.toUpperCase() });
-      if (room) {
-        room.code = code;
-        await room.save();
-        socket.to(roomId).emit('code-update', { code });
-      }
+      const roomKey = String(roomId || '').trim().toUpperCase();
+      const normalized = normalizeIncomingFiles(files);
+      if (!roomKey || !normalized?.length) return;
+
+      const room = await Room.findOne({ roomId: roomKey });
+      if (!room) return;
+
+      room.files = normalized;
+      room.markModified('files');
+      await room.save();
+
+      socket.to(roomKey).emit('files-update', { files: room.files });
     } catch (error) {
-      console.error('Error saving code:', error);
+      console.error('Error saving files:', error);
     }
   });
 
   socket.on('language-change', async ({ roomId, language }) => {
     try {
-      const room = await Room.findOne({ roomId: roomId.toUpperCase() });
+      const roomKey = String(roomId || '').trim().toUpperCase();
+      const room = await Room.findOne({ roomId: roomKey });
       if (room) {
         room.language = language;
         await room.save();
-        io.to(roomId).emit('language-update', { language });
+        io.to(roomKey).emit('language-update', { language });
       }
     } catch (error) {
       console.error('Error saving language:', error);
@@ -344,17 +474,18 @@ io.on('connection', (socket) => {
 
   socket.on('chat-message', async ({ roomId, message, username }) => {
     try {
-      const room = await Room.findOne({ roomId: roomId.toUpperCase() });
+      const roomKey = String(roomId || '').trim().toUpperCase();
+      const room = await Room.findOne({ roomId: roomKey });
       if (room) {
         const chatMessage = {
           id: Date.now(),
           username,
           message,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
         room.chatHistory.push(chatMessage);
         await room.save();
-        io.to(roomId).emit('new-message', chatMessage);
+        io.to(roomKey).emit('new-message', chatMessage);
       }
     } catch (error) {
       console.error('Error saving chat message:', error);
@@ -363,12 +494,12 @@ io.on('connection', (socket) => {
 
 // WebRTC with PeerJS
 socket.on('join-video-call', ({ roomId, peerId }) => {
-  console.log(` ${peerId} joining video call in room ${roomId}`);
-  
-  const activeRoom = activeRooms.get(roomId);
+  const roomKey = String(roomId || '').trim().toUpperCase();
+  console.log(` ${peerId} joining video call in room ${roomKey}`);
+
+  const activeRoom = activeRooms.get(roomKey);
   if (activeRoom) {
-    // Notify all other users about the new peer
-    socket.to(roomId).emit('user-joined-video-call', { peerId });
+    socket.to(roomKey).emit('user-joined-video-call', { peerId });
   }
 });
 
@@ -392,8 +523,9 @@ socket.on('returning-signal', ({ signal, callerID }) => {
 
 // User leaves video call
 socket.on('leave-video-call', ({ roomId }) => {
+  const roomKey = String(roomId || '').trim().toUpperCase();
   console.log(` ${socket.id} leaving video call`);
-  socket.to(roomId).emit('user-left-video', { peerId: socket.id });
+  socket.to(roomKey).emit('user-left-video', { peerId: socket.id });
 });
 
   socket.on('disconnect', () => {
