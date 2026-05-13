@@ -40,6 +40,11 @@ const roomSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  /** SHA-256 hex of admin capability token; absent on legacy rooms (delete uses username only). */
+  adminTokenHash: {
+    type: String,
+    default: undefined,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

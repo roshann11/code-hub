@@ -4,9 +4,25 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import Room from './src/models/Room.js';
 
 dotenv.config();
+
+function hashAdminToken(token) {
+  return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+function generateAdminToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function normalizeDisplayName(username) {
+  if (username == null) return '';
+  const s = String(username).trim();
+  if (!s || s.length > 40) return '';
+  return s;
+}
 
 const MAIN_BY_LANG = {
   javascript: 'main.js',
@@ -158,23 +174,36 @@ const activeRooms = new Map(); // roomId -> { users: Map(socketId -> user), isFi
 app.delete('/api/rooms/:roomId', async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { username } = req.body; // Assume username is sent in body
-    
+    const { username } = req.body;
+
     const room = await Room.findOne({ roomId: roomId.toUpperCase() });
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    
-    if (room.adminUsername !== username) {
-      return res.status(403).json({ error: 'Only the admin can delete the room' });
+
+    if (room.adminTokenHash) {
+      const authHeader = req.headers.authorization || '';
+      const bearer =
+        typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+          ? authHeader.slice(7).trim()
+          : '';
+      if (!bearer || hashAdminToken(bearer) !== room.adminTokenHash) {
+        return res.status(403).json({
+          error: 'Admin token required',
+          message: 'Use the device where you created the room, or recreate the room if you lost access.',
+        });
+      }
+    } else {
+      if (room.adminUsername !== username) {
+        return res.status(403).json({ error: 'Only the admin can delete the room' });
+      }
     }
-    
+
     await Room.deleteOne({ roomId: roomId.toUpperCase() });
 
     const roomKey = roomId.toUpperCase();
-    // Notify users in the room
     io.to(roomKey).emit('room-deleted', { message: 'Room has been deleted by admin' });
-    
+
     res.json({ success: true, message: 'Room deleted successfully' });
   } catch (error) {
     console.error('Error deleting room:', error);
@@ -392,20 +421,28 @@ io.on('connection', (socket) => {
       const roomKey = String(roomId || '').trim().toUpperCase();
       if (!roomKey) return;
 
-      console.log(` ${username} joining room: ${roomKey}`);
-      socket.join(roomKey);
+      const displayName = normalizeDisplayName(username);
+      if (!displayName) {
+        socket.emit('join-rejected', {
+          message: 'Enter a display name (1–40 characters) to join.',
+        });
+        return;
+      }
 
       let room = await Room.findOne({ roomId: roomKey });
-      let isFirstUser = false;
+      let isNewRoom = false;
+      let adminTokenPlain = null;
 
       if (!room) {
+        adminTokenPlain = generateAdminToken();
         room = new Room({
           roomId: roomKey,
-          adminUsername: username,
+          adminUsername: displayName,
+          adminTokenHash: hashAdminToken(adminTokenPlain),
         });
         await room.save();
-        isFirstUser = true;
-        console.log(`Created new room: ${roomKey} with admin: ${username}`);
+        isNewRoom = true;
+        console.log(`Created new room: ${roomKey} with admin: ${displayName}`);
       }
 
       room = await ensureRoomFiles(room);
@@ -413,23 +450,43 @@ io.on('connection', (socket) => {
       if (!activeRooms.has(roomKey)) {
         activeRooms.set(roomKey, {
           users: new Map(),
-          isFirstUser,
         });
       }
 
       const activeRoom = activeRooms.get(roomKey);
-      activeRoom.users.set(socket.id, { username, socketId: socket.id });
+      for (const u of activeRoom.users.values()) {
+        if (u.username.toLowerCase() === displayName.toLowerCase()) {
+          socket.emit('join-rejected', {
+            message: 'That display name is already in use in this room. Pick another name.',
+          });
+          return;
+        }
+      }
 
-      socket.emit('room-state', {
+      console.log(` ${displayName} joining room: ${roomKey}`);
+      socket.join(roomKey);
+
+      activeRoom.users.set(socket.id, {
+        username: displayName,
+        socketId: socket.id,
+      });
+
+      const roomState = {
         files: room.files,
         language: room.language,
         users: Array.from(activeRoom.users.values()),
         chatHistory: room.chatHistory,
-        isAdmin: username === room.adminUsername,
-      });
+        isAdmin: displayName === room.adminUsername,
+        requiresAdminToken: !!room.adminTokenHash,
+      };
+      if (isNewRoom && adminTokenPlain) {
+        roomState.adminToken = adminTokenPlain;
+      }
+
+      socket.emit('room-state', roomState);
 
       socket.to(roomKey).emit('user-joined', {
-        username,
+        username: displayName,
         socketId: socket.id,
         users: Array.from(activeRoom.users.values()),
       });
