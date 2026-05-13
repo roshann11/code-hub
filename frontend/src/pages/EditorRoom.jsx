@@ -2,11 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video, Play, LogOut } from 'lucide-react';
 import { io } from 'socket.io-client';
 import CodeEditor from '../components/editor/CodeEditor';
+import FileTabs from '../components/editor/FileTabs';
 import LanguageSelector from '../components/editor/LanguageSelector';
 import ChatBox from '../components/chat/Chatbox';
 import AIAssistant from '../components/ai/AIAssistant';
 import VideoCall from '../components/video/VideoCall';
 import CodeOutput from '../components/editor/CodeOutput';
+import {
+  defaultMainPath,
+  normalizeFilesPayload,
+  pathToMonacoLanguage,
+  sanitizeFilePath,
+  uniquePath,
+  welcomeForLanguage,
+} from '../utils/projectFiles';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -19,8 +28,9 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
   const [showVideo, setShowVideo] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
   
-  // Editor state
-  const [code, setCode] = useState('// Loading...');
+  // Project + editor
+  const [files, setFiles] = useState([]);
+  const [activePath, setActivePath] = useState('');
   const [language, setLanguage] = useState('javascript');
   const isRemoteChange = useRef(false);
 
@@ -48,10 +58,18 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
     });
 
     // Room events
-    newSocket.on('room-state', ({ code: roomCode, language: roomLanguage, users: roomUsers, isAdmin: admin }) => {
+    newSocket.on('room-state', ({ files: roomFiles, language: roomLanguage, users: roomUsers, isAdmin: admin }) => {
       console.log('Received room state');
-      setCode(roomCode);
-      setLanguage(roomLanguage);
+      const list = normalizeFilesPayload(roomFiles);
+      const resolved =
+        list.length > 0
+          ? list
+          : [{ path: defaultMainPath(roomLanguage || 'javascript'), content: welcomeForLanguage(roomLanguage || 'javascript') }];
+      setFiles(resolved);
+      setLanguage(roomLanguage || 'javascript');
+      setActivePath((prev) =>
+        prev && resolved.some((f) => f.path === prev) ? prev : resolved[0].path
+      );
       setUsers(roomUsers);
       setIsAdmin(admin);
     });
@@ -66,11 +84,16 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
       setUsers(updatedUsers);
     });
 
-    // Code editor events
-    newSocket.on('code-update', ({ code: newCode }) => {
-      console.log('Received code update');
+    // Multi-file sync
+    newSocket.on('files-update', ({ files: incoming }) => {
+      const list = normalizeFilesPayload(incoming);
+      if (!list.length) return;
+      console.log('Received files update');
       isRemoteChange.current = true;
-      setCode(newCode);
+      setFiles(list);
+      setActivePath((prev) =>
+        prev && list.some((f) => f.path === prev) ? prev : list[0].path
+      );
     });
 
     newSocket.on('language-update', ({ language: newLanguage }) => {
@@ -94,17 +117,61 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
     };
   }, [roomId, username]);
 
+  const emitFiles = (nextFiles) => {
+    setFiles(nextFiles);
+    if (socket && socket.connected) {
+      socket.emit('files-change', { roomId, files: nextFiles });
+    }
+  };
+
   const handleCodeChange = (newCode) => {
-    // If this is a remote change, don't emit it back
     if (isRemoteChange.current) {
       isRemoteChange.current = false;
       return;
     }
+    if (!activePath) return;
+    const next = files.map((f) =>
+      f.path === activePath ? { ...f, content: newCode } : f
+    );
+    emitFiles(next);
+  };
 
-    setCode(newCode);
-    if (socket && socket.connected) {
-      socket.emit('code-change', { roomId, code: newCode });
+  const handleSelectFile = (path) => {
+    setActivePath(path);
+  };
+
+  const handleAddFile = () => {
+    const suggested = uniquePath(
+      defaultMainPath(language),
+      files.map((f) => f.path)
+    );
+    const rawName = window.prompt(
+      'New file path (e.g. utils.js or helpers/math.py)',
+      suggested
+    );
+    if (rawName === null) return;
+    const path = sanitizeFilePath(rawName) || suggested;
+    if (files.some((f) => f.path === path)) {
+      alert('A file with that path already exists.');
+      return;
     }
+    const snippet = welcomeForLanguage(language);
+    const next = [...files, { path, content: snippet }];
+    setActivePath(path);
+    emitFiles(next);
+  };
+
+  const handleDeleteFile = (path) => {
+    if (files.length <= 1) {
+      alert('Keep at least one file in the project.');
+      return;
+    }
+    if (!confirm(`Remove "${path}" from this project?`)) return;
+    const next = files.filter((f) => f.path !== path);
+    const nextActive =
+      path === activePath ? next[0].path : activePath;
+    setActivePath(nextActive);
+    emitFiles(next);
   };
 
   const handleLanguageChange = (newLanguage) => {
@@ -121,31 +188,15 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
   };
 
   const downloadCode = () => {
-    const extensions = {
-      javascript: 'js',
-      typescript: 'ts',
-      python: 'py',
-      java: 'java',
-      cpp: 'cpp',
-      c: 'c',
-      csharp: 'cs',
-      go: 'go',
-      rust: 'rs',
-      php: 'php',
-      ruby: 'rb',
-      html: 'html',
-      css: 'css',
-      json: 'json',
-      markdown: 'md',
-      sql: 'sql',
-    };
+    const file = files.find((f) => f.path === activePath) || files[0];
+    if (!file) return;
 
-    const extension = extensions[language] || 'txt';
-    const blob = new Blob([code], { type: 'text/plain' });
+    const blob = new Blob([file.content], { type: 'text/plain' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `code-${roomId}.${extension}`;
+    const safe = file.path.replace(/[/\\]/g, '-');
+    a.download = `${roomId}-${safe}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -176,6 +227,11 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
       alert('Failed to delete room');
     }
   };
+
+  const activeFile = files.find((f) => f.path === activePath);
+  const editorCode =
+    files.length === 0 ? '// Connecting…' : activeFile?.content ?? '// Select a file';
+  const monacoLanguage = pathToMonacoLanguage(activePath || activeFile?.path || 'file.txt');
 
   return (
     <div className="h-screen bg-slate-900 flex flex-col">
@@ -211,17 +267,21 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
         {/* Right side - Controls & Status */}
         <div className="flex items-center gap-3">
           
-          {/* Language Selector */}
-          <LanguageSelector 
-            language={language}
-            onLanguageChange={handleLanguageChange}
-          />
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="text-[10px] text-slate-500 hidden lg:block max-w-[140px] text-right leading-tight">
+              New-file template
+            </span>
+            <LanguageSelector
+              language={language}
+              onLanguageChange={handleLanguageChange}
+            />
+          </div>
 
           {/* Download Code */}
           <button
             onClick={downloadCode}
             className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-white text-sm"
-            title="Download code"
+            title="Download active file"
           >
             <Download className="w-4 h-4" />
             <span className="hidden md:inline">Download</span>
@@ -326,13 +386,23 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
       {/* Main Content - Editor + Sidebars */}
 <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
   
-  {/* Code Editor */}
-  <div className="flex-1 min-w-0 min-h-0">
-    <CodeEditor 
-      code={code}
-      language={language}
-      onChange={handleCodeChange}
+  {/* Code Editor + file tabs */}
+  <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+    <FileTabs
+      files={files}
+      activePath={activePath}
+      onSelect={handleSelectFile}
+      onAdd={handleAddFile}
+      onDelete={handleDeleteFile}
     />
+    <div className="flex-1 min-h-0">
+      <CodeEditor
+        key={`${roomId}-${activePath}`}
+        code={editorCode}
+        language={monacoLanguage}
+        onChange={handleCodeChange}
+      />
+    </div>
   </div>
 
   {/* Right Side Panels Container */}
@@ -341,7 +411,7 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
     {/* AI Assistant Panel */}
     {showAI && (
       <div className="lg:w-96 w-full h-full border-b lg:border-b-0 lg:border-l border-slate-700 flex-shrink-0">
-        <AIAssistant code={code} />
+        <AIAssistant files={files} />
       </div>
     )}
 
@@ -401,7 +471,7 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
 
 {/* Output Panel - Below Editor */}
   {showOutput && (
-    <CodeOutput code={code} language={language} />
+    <CodeOutput files={files} entryPath={activePath} />
   )}
   
 {/* Video Call Panel*/}
