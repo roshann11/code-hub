@@ -3,7 +3,7 @@ import { Bot, Send, Sparkles, Loader, AlertCircle, Zap } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-function AIAssistant({ code }) {
+function AIAssistant({ files }) {
   const [question, setQuestion] = useState('');
   const [conversation, setConversation] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -46,9 +46,9 @@ function AIAssistant({ code }) {
         headers: { 
           'Content-Type': 'application/json' 
         },
-        body: JSON.stringify({ 
-          code, 
-          question: currentQuestion 
+        body: JSON.stringify({
+          files: files?.length ? files : undefined,
+          question: currentQuestion,
         })
       });
 

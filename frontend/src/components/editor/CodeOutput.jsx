@@ -1,17 +1,26 @@
 import React, { useState } from 'react';
-import { Play, Square, Terminal, AlertCircle, CheckCircle, Clock, Loader } from 'lucide-react';
+import { Play, Terminal, AlertCircle, CheckCircle, Clock, Loader } from 'lucide-react';
+import { pathToRuntimeLanguage } from '../../utils/projectFiles';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-function CodeOutput({ code, language }) {
+function CodeOutput({ files, entryPath }) {
   const [output, setOutput] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [executionTime, setExecutionTime] = useState(0);
 
+  const entry = files?.find((f) => f.path === entryPath) || files?.[0];
+  const code = entry?.content ?? '';
+  const language = pathToRuntimeLanguage(entry?.path || entryPath || '');
+
   const executeCode = async () => {
-    if (!code || !code.trim()) {
-      setError('Please write some code first!');
+    if (!files?.length) {
+      setError('No files in project.');
+      return;
+    }
+    if (!code?.trim()) {
+      setError('The active file is empty.');
       return;
     }
 
@@ -27,9 +36,10 @@ function CodeOutput({ code, language }) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          code,
-          language
-        })
+          files,
+          entryPath: entry?.path || entryPath,
+          language,
+        }),
       });
 
       const data = await response.json();
