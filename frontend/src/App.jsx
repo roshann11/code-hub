@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import RoomJoin from './components/room/RoomJoin';
 import EditorRoom from './pages/EditorRoom';
 import { adminTokenStorageKey } from './utils/roomAdminToken';
+import { getStoredPhoneJwt } from './utils/phoneAuth';
 
 const SESSION_KEY = 'coders-hub-session';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 function readStoredSession() {
   if (typeof window === 'undefined') {
@@ -49,7 +51,20 @@ function App() {
     }
   }, [stage, roomId, username]);
 
-  const handleJoinRoom = () => {
+  const handleJoinRoom = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/phone-status`);
+      const status = await res.json();
+      if (!status.skipPhoneAuth && !getStoredPhoneJwt()) {
+        alert('Verify your phone number first.');
+        return;
+      }
+    } catch {
+      if (!getStoredPhoneJwt()) {
+        alert('Could not reach the server to verify phone login.');
+        return;
+      }
+    }
     const r = roomId.trim().toUpperCase();
     const u = username.trim().slice(0, 40);
     if (r && u) {

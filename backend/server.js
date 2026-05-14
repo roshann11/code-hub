@@ -6,6 +6,13 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import Room from './src/models/Room.js';
+import { normalizeE164 } from './src/auth/phoneNormalize.js';
+import {
+  sendVerificationSms,
+  verifyOtp,
+  isTwilioConfigured,
+} from './src/auth/twilioVerify.js';
+import { signPhoneJwt, verifyPhoneJwt } from './src/auth/phoneJwt.js';
 
 dotenv.config();
 
@@ -134,6 +141,95 @@ app.use(cors({
 
 app.use(express.json());
 
+const skipPhoneAuth = process.env.SKIP_PHONE_AUTH === 'true';
+if (!skipPhoneAuth && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16)) {
+  console.warn(
+    '[auth] JWT_SECRET missing or too short; set JWT_SECRET (16+ chars) or SKIP_PHONE_AUTH=true for local dev.'
+  );
+}
+if (!skipPhoneAuth && !isTwilioConfigured()) {
+  console.warn(
+    '[auth] Twilio Verify env vars missing; SMS will fail until TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_VERIFY_SERVICE_SID are set.'
+  );
+}
+
+app.get('/api/auth/phone-status', (req, res) => {
+  res.json({
+    skipPhoneAuth,
+    twilioConfigured: isTwilioConfigured(),
+    jwtConfigured: !!(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16),
+  });
+});
+
+app.post('/api/auth/send-otp', async (req, res) => {
+  if (skipPhoneAuth) {
+    return res.status(400).json({
+      error: 'Phone auth disabled',
+      message: 'Server has SKIP_PHONE_AUTH=true; no SMS needed.',
+    });
+  }
+  try {
+    const phone = normalizeE164(req.body?.phone);
+    if (!phone) {
+      return res.status(400).json({
+        error: 'Invalid phone',
+        message: 'Use international format with country code, e.g. +15551234567',
+      });
+    }
+    await sendVerificationSms(phone);
+    res.json({ success: true, message: 'Verification code sent.' });
+  } catch (e) {
+    if (e.code === 'TWILIO_NOT_CONFIGURED') {
+      return res.status(503).json({
+        error: 'SMS not configured',
+        message: 'Set Twilio credentials on the server.',
+      });
+    }
+    console.error('send-otp:', e);
+    res.status(500).json({
+      error: 'Failed to send SMS',
+      message: e.message || 'Unknown error',
+    });
+  }
+});
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+  if (skipPhoneAuth) {
+    return res.status(400).json({ error: 'Phone auth disabled' });
+  }
+  try {
+    const phone = normalizeE164(req.body?.phone);
+    const code = req.body?.code;
+    if (!phone || !code) {
+      return res.status(400).json({ error: 'Phone and verification code are required' });
+    }
+    const ok = await verifyOtp(phone, code);
+    if (!ok) {
+      return res.status(400).json({ error: 'Invalid or expired verification code' });
+    }
+    let token;
+    try {
+      token = signPhoneJwt(phone);
+    } catch (signErr) {
+      console.error('JWT sign error:', signErr);
+      return res.status(500).json({
+        error: 'Server misconfiguration',
+        message: 'JWT_SECRET must be set (16+ characters) for phone login.',
+      });
+    }
+    res.json({ success: true, token });
+  } catch (e) {
+    if (e.code === 'TWILIO_NOT_CONFIGURED') {
+      return res.status(503).json({ error: 'SMS not configured' });
+    }
+    console.error('verify-otp:', e);
+    res.status(500).json({
+      error: 'Verification failed',
+      message: e.message || 'Unknown error',
+    });
+  }
+});
+
 const httpServer = createServer(app);
 
 // SOCKET.IO CONFIGURATION 
@@ -162,6 +258,30 @@ const io = new Server(httpServer, {
   allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000
+});
+
+io.use((socket, next) => {
+  if (skipPhoneAuth) {
+    socket.verifiedPhone = null;
+    return next();
+  }
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token || typeof token !== 'string') {
+      return next(
+        new Error('Phone verification required. Verify your number on the join page first.')
+      );
+    }
+    const { phone } = verifyPhoneJwt(token);
+    socket.verifiedPhone = phone;
+    next();
+  } catch (e) {
+    next(
+      new Error(
+        'Invalid or expired phone session. Verify your number again on the join page.'
+      )
+    );
+  }
 });
 
 // DATA STORAGE
@@ -499,6 +619,8 @@ io.on('connection', (socket) => {
   socket.on('files-change', async ({ roomId, files }) => {
     try {
       const roomKey = String(roomId || '').trim().toUpperCase();
+      if (!socket.rooms.has(roomKey)) return;
+
       const normalized = normalizeIncomingFiles(files);
       if (!roomKey || !normalized?.length) return;
 
@@ -518,6 +640,8 @@ io.on('connection', (socket) => {
   socket.on('language-change', async ({ roomId, language }) => {
     try {
       const roomKey = String(roomId || '').trim().toUpperCase();
+      if (!socket.rooms.has(roomKey)) return;
+
       const room = await Room.findOne({ roomId: roomKey });
       if (room) {
         room.language = language;
@@ -532,11 +656,17 @@ io.on('connection', (socket) => {
   socket.on('chat-message', async ({ roomId, message, username }) => {
     try {
       const roomKey = String(roomId || '').trim().toUpperCase();
+      if (!socket.rooms.has(roomKey)) return;
+
+      const activeRoom = activeRooms.get(roomKey);
+      const member = activeRoom?.users.get(socket.id);
+      if (!member) return;
+
       const room = await Room.findOne({ roomId: roomKey });
       if (room) {
         const chatMessage = {
           id: Date.now(),
-          username,
+          username: member.username,
           message,
           timestamp: new Date(),
         };

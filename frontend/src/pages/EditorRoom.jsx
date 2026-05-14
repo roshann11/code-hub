@@ -17,6 +17,10 @@ import {
   welcomeForLanguage,
 } from '../utils/projectFiles';
 import { adminTokenStorageKey } from '../utils/roomAdminToken';
+import {
+  getStoredPhoneJwt,
+  clearStoredPhoneJwt,
+} from '../utils/phoneAuth';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -53,107 +57,153 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
   const [showChat, setShowChat] = useState(false);
 
   useEffect(() => {
-    // Create socket connection
-    const newSocket = io(SOCKET_URL);
-    setSocket(newSocket);
+    let newSocket;
+    let cancelled = false;
 
-    // Connection events
-    newSocket.on('connect', () => {
-      console.log('Connected to server');
-      setConnected(true);
-      newSocket.emit('join-room', { roomId, username });
-    });
+    async function setupSocket() {
+      let authPayload = {};
+      try {
+        const res = await fetch(`${SOCKET_URL}/api/auth/phone-status`);
+        const status = await res.json();
+        if (cancelled) return;
+        if (!status.skipPhoneAuth) {
+          const jwt = getStoredPhoneJwt();
+          if (!jwt) {
+            alert(
+              'Phone verification required. Go back to the join page and verify your number.'
+            );
+            onLeaveRoom?.();
+            return;
+          }
+          authPayload = { token: jwt };
+        }
+      } catch {
+        if (cancelled) return;
+        if (!getStoredPhoneJwt()) {
+          alert('Could not reach the server to check phone auth.');
+          onLeaveRoom?.();
+          return;
+        }
+      }
 
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from server');
-      setConnected(false);
-    });
+      if (cancelled) return;
 
-    // Room events
-    newSocket.on('room-state', ({
-      files: roomFiles,
-      language: roomLanguage,
-      users: roomUsers,
-      isAdmin: admin,
-      requiresAdminToken: needsToken,
-      adminToken: issuedToken,
-    }) => {
-      console.log('Received room state');
-      const list = normalizeFilesPayload(roomFiles);
-      const resolved =
-        list.length > 0
-          ? list
-          : [{ path: defaultMainPath(roomLanguage || 'javascript'), content: welcomeForLanguage(roomLanguage || 'javascript') }];
-      setFiles(resolved);
-      setLanguage(roomLanguage || 'javascript');
-      setActivePath((prev) =>
-        prev && resolved.some((f) => f.path === prev) ? prev : resolved[0].path
-      );
-      setUsers(roomUsers);
-      setIsAdmin(admin);
-      setRequiresAdminToken(!!needsToken);
-      if (typeof issuedToken === 'string' && issuedToken.length > 0) {
-        setAdminToken(issuedToken);
+      newSocket = io(SOCKET_URL, { auth: authPayload });
+      setSocket(newSocket);
+
+      newSocket.on('connect', () => {
+        console.log('Connected to server');
+        setConnected(true);
+        newSocket.emit('join-room', { roomId, username });
+      });
+
+      newSocket.on('connect_error', (err) => {
+        console.error('Socket connect_error:', err.message);
+        const msg =
+          err.message ||
+          'Connection failed. If phone verification is required, try again from the join page.';
+        alert(msg);
+        if (
+          err.message?.includes('expired') ||
+          err.message?.includes('Invalid') ||
+          err.message?.includes('verification')
+        ) {
+          clearStoredPhoneJwt();
+        }
+        onLeaveRoom?.();
+      });
+
+      newSocket.on('disconnect', () => {
+        console.log('Disconnected from server');
+        setConnected(false);
+      });
+
+      newSocket.on('room-state', ({
+        files: roomFiles,
+        language: roomLanguage,
+        users: roomUsers,
+        isAdmin: admin,
+        requiresAdminToken: needsToken,
+        adminToken: issuedToken,
+      }) => {
+        console.log('Received room state');
+        const list = normalizeFilesPayload(roomFiles);
+        const resolved =
+          list.length > 0
+            ? list
+            : [{ path: defaultMainPath(roomLanguage || 'javascript'), content: welcomeForLanguage(roomLanguage || 'javascript') }];
+        setFiles(resolved);
+        setLanguage(roomLanguage || 'javascript');
+        setActivePath((prev) =>
+          prev && resolved.some((f) => f.path === prev) ? prev : resolved[0].path
+        );
+        setUsers(roomUsers);
+        setIsAdmin(admin);
+        setRequiresAdminToken(!!needsToken);
+        if (typeof issuedToken === 'string' && issuedToken.length > 0) {
+          setAdminToken(issuedToken);
+          try {
+            sessionStorage.setItem(adminTokenStorageKey(roomId), issuedToken);
+          } catch {
+            /* ignore */
+          }
+        } else if (needsToken) {
+          const stored = readStoredAdminToken(roomId);
+          setAdminToken(stored);
+        } else {
+          setAdminToken(null);
+        }
+      });
+
+      newSocket.on('join-rejected', ({ message }) => {
+        alert(message || 'Could not join this room.');
+        newSocket.close();
+        onLeaveRoom?.();
+      });
+
+      newSocket.on('user-joined', ({ username: newUser, users: updatedUsers }) => {
+        console.log(`${newUser} joined the room`);
+        setUsers(updatedUsers);
+      });
+
+      newSocket.on('user-left', ({ username: leftUser, users: updatedUsers }) => {
+        console.log(`${leftUser} left the room`);
+        setUsers(updatedUsers);
+      });
+
+      newSocket.on('files-update', ({ files: incoming }) => {
+        const list = normalizeFilesPayload(incoming);
+        if (!list.length) return;
+        console.log('Received files update');
+        isRemoteChange.current = true;
+        setFiles(list);
+        setActivePath((prev) =>
+          prev && list.some((f) => f.path === prev) ? prev : list[0].path
+        );
+      });
+
+      newSocket.on('language-update', ({ language: newLanguage }) => {
+        console.log('Language updated to:', newLanguage);
+        setLanguage(newLanguage);
+      });
+
+      newSocket.on('room-deleted', ({ message }) => {
+        alert(message);
         try {
-          sessionStorage.setItem(adminTokenStorageKey(roomId), issuedToken);
+          sessionStorage.removeItem('coders-hub-session');
+          sessionStorage.removeItem(adminTokenStorageKey(roomId));
         } catch {
           /* ignore */
         }
-      } else if (needsToken) {
-        const stored = readStoredAdminToken(roomId);
-        setAdminToken(stored);
-      } else {
-        setAdminToken(null);
-      }
-    });
+        window.location.href = '/';
+      });
+    }
 
-    newSocket.on('join-rejected', ({ message }) => {
-      alert(message || 'Could not join this room.');
-      newSocket.close();
-      onLeaveRoom?.();
-    });
+    setupSocket();
 
-    newSocket.on('user-joined', ({ username: newUser, users: updatedUsers }) => {
-      console.log(`${newUser} joined the room`);
-      setUsers(updatedUsers);
-    });
-
-    newSocket.on('user-left', ({ username: leftUser, users: updatedUsers }) => {
-      console.log(`${leftUser} left the room`);
-      setUsers(updatedUsers);
-    });
-
-    // Multi-file sync
-    newSocket.on('files-update', ({ files: incoming }) => {
-      const list = normalizeFilesPayload(incoming);
-      if (!list.length) return;
-      console.log('Received files update');
-      isRemoteChange.current = true;
-      setFiles(list);
-      setActivePath((prev) =>
-        prev && list.some((f) => f.path === prev) ? prev : list[0].path
-      );
-    });
-
-    newSocket.on('language-update', ({ language: newLanguage }) => {
-      console.log('Language updated to:', newLanguage);
-      setLanguage(newLanguage);
-    });
-
-    newSocket.on('room-deleted', ({ message }) => {
-      alert(message);
-      try {
-        sessionStorage.removeItem('coders-hub-session');
-        sessionStorage.removeItem(adminTokenStorageKey(roomId));
-      } catch {
-        /* ignore */
-      }
-      window.location.href = '/'; // Redirect to home
-    });
-
-    // Cleanup
     return () => {
-      newSocket.close();
+      cancelled = true;
+      if (newSocket) newSocket.close();
     };
   }, [roomId, username, onLeaveRoom]);
 
