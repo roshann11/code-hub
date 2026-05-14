@@ -1,3 +1,6 @@
 .env
+frontend/.env.production
 backend/.env
 frontend/.env
+backend/node_modules
+frontend/node_modules
