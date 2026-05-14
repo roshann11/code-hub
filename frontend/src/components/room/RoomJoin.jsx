@@ -16,7 +16,7 @@ function RoomJoin({
   onJoin,
   onCreateRoom,
 }) {
-  const [phoneAuthLoading, setPhoneAuthLoading] = useState(true);
+  const [phoneAuthLoading, setPhoneAuthLoading] = useState(false); // useState(true);
   const [skipPhoneAuth, setSkipPhoneAuth] = useState(false);
   const [phone, setPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -24,7 +24,7 @@ function RoomJoin({
   const [otpHint, setOtpHint] = useState('');
   const [cooldownSec, setCooldownSec] = useState(0);
 
-  const phoneVerified = skipPhoneAuth || !!getStoredPhoneJwt();
+  const phoneVerified = true; // skipPhoneAuth || !!getStoredPhoneJwt();
 
   useEffect(() => {
     if (cooldownSec <= 0) return undefined;
@@ -148,6 +148,7 @@ function RoomJoin({
           <p className="text-slate-400">Code together in real-time</p>
         </div>
 
+        {/*
         {!phoneAuthLoading && !skipPhoneAuth && (
           <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-900/50 space-y-3">
             <div className="flex items-center gap-2 text-white font-medium text-sm">
@@ -224,6 +225,7 @@ function RoomJoin({
             Loading…
           </div>
         )}
+        */}
 
         <div className="space-y-4">
           <div>

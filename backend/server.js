@@ -6,13 +6,13 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import Room from './src/models/Room.js';
-import { normalizeE164 } from './src/auth/phoneNormalize.js';
-import {
-  sendVerificationSms,
-  verifyOtp,
-  isTwilioConfigured,
-} from './src/auth/twilioVerify.js';
-import { signPhoneJwt, verifyPhoneJwt } from './src/auth/phoneJwt.js';
+// import { normalizeE164 } from './src/auth/phoneNormalize.js';
+// import {
+//   sendVerificationSms,
+//   verifyOtp,
+//   isTwilioConfigured,
+// } from './src/auth/twilioVerify.js';
+// import { signPhoneJwt, verifyPhoneJwt } from './src/auth/phoneJwt.js';
 
 dotenv.config();
 
@@ -141,6 +141,7 @@ app.use(cors({
 
 app.use(express.json());
 
+/*
 const skipPhoneAuth = process.env.SKIP_PHONE_AUTH === 'true';
 if (!skipPhoneAuth && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16)) {
   console.warn(
@@ -229,6 +230,7 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     });
   }
 });
+*/
 
 const httpServer = createServer(app);
 
@@ -260,6 +262,7 @@ const io = new Server(httpServer, {
   pingInterval: 25000
 });
 
+/*
 io.use((socket, next) => {
   if (skipPhoneAuth) {
     socket.verifiedPhone = null;
@@ -283,6 +286,7 @@ io.use((socket, next) => {
     );
   }
 });
+*/
 
 // DATA STORAGE
 
