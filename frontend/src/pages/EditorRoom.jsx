@@ -16,8 +16,18 @@ import {
   uniquePath,
   welcomeForLanguage,
 } from '../utils/projectFiles';
+import { adminTokenStorageKey } from '../utils/roomAdminToken';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+function readStoredAdminToken(rid) {
+  if (typeof window === 'undefined') return null;
+  try {
+    return sessionStorage.getItem(adminTokenStorageKey(rid)) || null;
+  } catch {
+    return null;
+  }
+}
 
 function EditorRoom({ roomId, username, onLeaveRoom }) {
   const [socket, setSocket] = useState(null);
@@ -34,8 +44,10 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
   const [language, setLanguage] = useState('javascript');
   const isRemoteChange = useRef(false);
 
-  // Admin state
+  // Admin state (display admin + optional capability token for delete)
   const [isAdmin, setIsAdmin] = useState(false);
+  const [requiresAdminToken, setRequiresAdminToken] = useState(false);
+  const [adminToken, setAdminToken] = useState(() => readStoredAdminToken(roomId));
 
   // UI state
   const [showChat, setShowChat] = useState(false);
@@ -58,7 +70,14 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
     });
 
     // Room events
-    newSocket.on('room-state', ({ files: roomFiles, language: roomLanguage, users: roomUsers, isAdmin: admin }) => {
+    newSocket.on('room-state', ({
+      files: roomFiles,
+      language: roomLanguage,
+      users: roomUsers,
+      isAdmin: admin,
+      requiresAdminToken: needsToken,
+      adminToken: issuedToken,
+    }) => {
       console.log('Received room state');
       const list = normalizeFilesPayload(roomFiles);
       const resolved =
@@ -72,6 +91,26 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
       );
       setUsers(roomUsers);
       setIsAdmin(admin);
+      setRequiresAdminToken(!!needsToken);
+      if (typeof issuedToken === 'string' && issuedToken.length > 0) {
+        setAdminToken(issuedToken);
+        try {
+          sessionStorage.setItem(adminTokenStorageKey(roomId), issuedToken);
+        } catch {
+          /* ignore */
+        }
+      } else if (needsToken) {
+        const stored = readStoredAdminToken(roomId);
+        setAdminToken(stored);
+      } else {
+        setAdminToken(null);
+      }
+    });
+
+    newSocket.on('join-rejected', ({ message }) => {
+      alert(message || 'Could not join this room.');
+      newSocket.close();
+      onLeaveRoom?.();
     });
 
     newSocket.on('user-joined', ({ username: newUser, users: updatedUsers }) => {
@@ -105,6 +144,7 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
       alert(message);
       try {
         sessionStorage.removeItem('coders-hub-session');
+        sessionStorage.removeItem(adminTokenStorageKey(roomId));
       } catch {
         /* ignore */
       }
@@ -115,7 +155,11 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
     return () => {
       newSocket.close();
     };
-  }, [roomId, username]);
+  }, [roomId, username, onLeaveRoom]);
+
+  useEffect(() => {
+    setAdminToken(readStoredAdminToken(roomId));
+  }, [roomId]);
 
   const emitFiles = (nextFiles) => {
     setFiles(nextFiles);
@@ -210,23 +254,37 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
 
   const deleteRoom = async () => {
     if (!confirm('Are you sure you want to delete this room? This action cannot be undone.')) return;
-    
+
+    if (requiresAdminToken && !adminToken) {
+      alert(
+        'Delete requires the admin secret from the browser where the room was created. If you lost it, leave the room and create a new one.'
+      );
+      return;
+    }
+
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (requiresAdminToken && adminToken) {
+        headers.Authorization = `Bearer ${adminToken}`;
+      }
       const response = await fetch(`${SOCKET_URL}/api/rooms/${roomId}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username })
+        headers,
+        body: JSON.stringify({ username }),
       });
-      
+
       if (!response.ok) {
-        const error = await response.json();
-        alert(error.error || 'Failed to delete room');
+        const error = await response.json().catch(() => ({}));
+        alert(error.message || error.error || 'Failed to delete room');
       }
     } catch (error) {
       console.error('Error deleting room:', error);
       alert('Failed to delete room');
     }
   };
+
+  const canDeleteRoom =
+    isAdmin && (!requiresAdminToken || (typeof adminToken === 'string' && adminToken.length > 0));
 
   const activeFile = files.find((f) => f.path === activePath);
   const editorCode =
@@ -353,12 +411,16 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
             <span className="hidden md:inline">Leave Room</span>
           </button>
 
-          {/* Delete Room (Admin only) */}
-          {isAdmin && (
+          {/* Delete Room: legacy = display admin only; new rooms = admin + stored token */}
+          {canDeleteRoom && (
             <button
               onClick={deleteRoom}
               className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg transition-colors text-white text-sm"
-              title="Delete room (Admin only)"
+              title={
+                requiresAdminToken
+                  ? 'Delete room (admin token on this device)'
+                  : 'Delete room (legacy room — use a new room for stronger protection)'
+              }
             >
               <X className="w-4 h-4" />
               <span className="hidden md:inline">Delete Room</span>

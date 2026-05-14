@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import RoomJoin from './components/room/RoomJoin';
 import EditorRoom from './pages/EditorRoom';
+import { adminTokenStorageKey } from './utils/roomAdminToken';
 
 const SESSION_KEY = 'coders-hub-session';
 
@@ -49,7 +50,11 @@ function App() {
   }, [stage, roomId, username]);
 
   const handleJoinRoom = () => {
-    if (roomId.trim() && username.trim()) {
+    const r = roomId.trim().toUpperCase();
+    const u = username.trim().slice(0, 40);
+    if (r && u) {
+      setRoomId(r);
+      setUsername(u);
       setStage('editor');
     }
   };
@@ -60,10 +65,16 @@ function App() {
     setRoomId(newRoomId);
   };
 
-  const handleLeaveRoom = () => {
+  const handleLeaveRoom = useCallback(() => {
+    try {
+      const id = roomId.trim().toUpperCase();
+      if (id) sessionStorage.removeItem(adminTokenStorageKey(id));
+    } catch {
+      /* ignore */
+    }
     setStage('join');
     setRoomId('');
-  };
+  }, [roomId]);
 
   // Show join screen
   if (stage === 'join') {

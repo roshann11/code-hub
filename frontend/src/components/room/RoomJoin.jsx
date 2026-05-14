@@ -54,8 +54,11 @@ function RoomJoin({
               onKeyPress={handleKeyPress}
               placeholder="Enter your name"
               className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
-              maxLength={20}
+              maxLength={40}
             />
+            <p className="text-xs text-slate-500 mt-1">
+              Names must be unique in a room. Room creator gets a secret delete key on this device only.
+            </p>
           </div>
 
           {/* Room Code Input */}
