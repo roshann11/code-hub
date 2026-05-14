@@ -52,6 +52,7 @@ function App() {
   }, [stage, roomId, username]);
 
   const handleJoinRoom = async () => {
+    /*
     try {
       const res = await fetch(`${API_BASE}/api/auth/phone-status`);
       const status = await res.json();
@@ -65,6 +66,7 @@ function App() {
         return;
       }
     }
+    */
     const r = roomId.trim().toUpperCase();
     const u = username.trim().slice(0, 40);
     if (r && u) {

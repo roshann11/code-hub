@@ -62,6 +62,7 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
 
     async function setupSocket() {
       let authPayload = {};
+      /*
       try {
         const res = await fetch(`${SOCKET_URL}/api/auth/phone-status`);
         const status = await res.json();
@@ -85,6 +86,7 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
           return;
         }
       }
+      */
 
       if (cancelled) return;
 
@@ -94,7 +96,7 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
       newSocket.on('connect', () => {
         console.log('Connected to server');
         setConnected(true);
-        newSocket.emit('join-room', { roomId, username });
+        newSocket.emit('join-room', { roomId, username, adminToken });
       });
 
       newSocket.on('connect_error', (err) => {

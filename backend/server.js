@@ -540,7 +540,7 @@ app.post('/api/execute-code', async (req, res) => {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
   
-  socket.on('join-room', async ({ roomId, username }) => {
+  socket.on('join-room', async ({ roomId, username, adminToken: clientAdminToken }) => {
     try {
       const roomKey = String(roomId || '').trim().toUpperCase();
       if (!roomKey) return;
@@ -567,6 +567,19 @@ io.on('connection', (socket) => {
         await room.save();
         isNewRoom = true;
         console.log(`Created new room: ${roomKey} with admin: ${displayName}`);
+      } else {
+        // Protect the admin name
+        if (displayName.toLowerCase() === room.adminUsername.toLowerCase()) {
+          // If the user is trying to join with the admin's name, they MUST have the token
+          if (room.adminTokenHash) {
+            if (!clientAdminToken || hashAdminToken(clientAdminToken) !== room.adminTokenHash) {
+              socket.emit('join-rejected', {
+                message: 'This name is reserved for the room administrator.',
+              });
+              return;
+            }
+          }
+        }
       }
 
       room = await ensureRoomFiles(room);
