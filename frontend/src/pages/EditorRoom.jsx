@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video, Play, LogOut } from 'lucide-react';
+import { Monitor, Users, Copy, Check, Download, MessageSquare, X, Bot, Video, Play, LogOut, Smartphone, Loader } from 'lucide-react';
 import { io } from 'socket.io-client';
 import CodeEditor from '../components/editor/CodeEditor';
 import FileTabs from '../components/editor/FileTabs';
@@ -55,6 +55,9 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
 
   // UI state
   const [showChat, setShowChat] = useState(false);
+  const [waitingUsers, setWaitingUsers] = useState([]); // { socketId, username }
+  const [isWaitingForApproval, setIsWaitingForApproval] = useState(false);
+  const [waitingMessage, setWaitingMessage] = useState('');
 
   useEffect(() => {
     let newSocket;
@@ -120,6 +123,19 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
         setConnected(false);
       });
 
+      newSocket.on('room-knock', ({ username: knockingUser, socketId }) => {
+        console.log(`${knockingUser} is knocking...`);
+        setWaitingUsers((prev) => {
+          if (prev.some((u) => u.socketId === socketId)) return prev;
+          return [...prev, { socketId, username: knockingUser }];
+        });
+      });
+
+      newSocket.on('waiting-approval', ({ message }) => {
+        setIsWaitingForApproval(true);
+        setWaitingMessage(message);
+      });
+
       newSocket.on('room-state', ({
         files: roomFiles,
         language: roomLanguage,
@@ -129,6 +145,7 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
         adminToken: issuedToken,
       }) => {
         console.log('Received room state');
+        setIsWaitingForApproval(false);
         const list = normalizeFilesPayload(roomFiles);
         const resolved =
           list.length > 0
@@ -335,6 +352,20 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
     }
   };
 
+  const handleApproveUser = (targetSocketId) => {
+    if (socket && socket.connected) {
+      socket.emit('approve-join', { roomId, targetSocketId });
+      setWaitingUsers((prev) => prev.filter((u) => u.socketId !== targetSocketId));
+    }
+  };
+
+  const handleRejectUser = (targetSocketId) => {
+    if (socket && socket.connected) {
+      socket.emit('reject-join', { roomId, targetSocketId });
+      setWaitingUsers((prev) => prev.filter((u) => u.socketId !== targetSocketId));
+    }
+  };
+
   const canDeleteRoom =
     isAdmin && (!requiresAdminToken || (typeof adminToken === 'string' && adminToken.length > 0));
 
@@ -342,6 +373,29 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
   const editorCode =
     files.length === 0 ? '// Connecting…' : activeFile?.content ?? '// Select a file';
   const monacoLanguage = pathToMonacoLanguage(activePath || activeFile?.path || 'file.txt');
+
+  if (isWaitingForApproval) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="bg-slate-800 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-purple-500/20 text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-500/20 rounded-full mb-4">
+            <Smartphone className="w-8 h-8 text-purple-400 animate-pulse" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-4">Awaiting Permission</h2>
+          <p className="text-slate-400 mb-6">{waitingMessage}</p>
+          <div className="flex justify-center mb-6">
+            <Loader className="w-6 h-6 animate-spin text-purple-500" />
+          </div>
+          <button
+            onClick={onLeaveRoom}
+            className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-slate-900 flex flex-col">
@@ -540,12 +594,45 @@ function EditorRoom({ roomId, username, onLeaveRoom }) {
       </div>
     )}
 
-    {/* Users Sidebar */}
-    <div className="lg:w-64 w-full bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto flex-shrink-0">
-      <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-        <Users className="w-5 h-5 text-purple-400" />
-        Active Users ({users.length})
-      </h3>
+      {/* Users Sidebar */}
+      <div className="lg:w-64 w-full bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto flex-shrink-0">
+        
+        {/* Waiting Users (Admin only) */}
+        {isAdmin && waitingUsers.length > 0 && (
+          <div className="mb-6">
+            <h3 className="text-amber-400 font-semibold mb-3 flex items-center gap-2 text-sm uppercase tracking-wider">
+              <Users className="w-4 h-4" />
+              Waiting to Join ({waitingUsers.length})
+            </h3>
+            <div className="space-y-3">
+              {waitingUsers.map((u) => (
+                <div key={u.socketId} className="bg-slate-700/50 p-3 rounded-lg border border-amber-500/30">
+                  <p className="text-white text-sm font-medium mb-2 truncate">{u.username}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleApproveUser(u.socketId)}
+                      className="flex-1 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded"
+                    >
+                      Allow
+                    </button>
+                    <button
+                      onClick={() => handleRejectUser(u.socketId)}
+                      className="flex-1 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded"
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="my-4 border-t border-slate-700"></div>
+          </div>
+        )}
+
+        <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+          <Users className="w-5 h-5 text-purple-400" />
+          Active Users ({users.length})
+        </h3>
       <div className="space-y-2">
         {users.map((user) => (
           <div 

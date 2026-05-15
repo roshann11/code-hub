@@ -290,7 +290,7 @@ io.use((socket, next) => {
 
 // DATA STORAGE
 
-const activeRooms = new Map(); // roomId -> { users: Map(socketId -> user), isFirstUser: boolean }
+const activeRooms = new Map(); // roomId -> { users: Map(socketId -> user), pendingUsers: Map(socketId -> user) }
 
 // REST API ENDPOINTS
 
@@ -587,10 +587,32 @@ io.on('connection', (socket) => {
       if (!activeRooms.has(roomKey)) {
         activeRooms.set(roomKey, {
           users: new Map(),
+          pendingUsers: new Map(),
         });
       }
 
       const activeRoom = activeRooms.get(roomKey);
+      const isAdmin = displayName === room.adminUsername;
+      const isActuallyAdmin = isNewRoom || (isAdmin && (!room.adminTokenHash || (clientAdminToken && hashAdminToken(clientAdminToken) === room.adminTokenHash)));
+
+      // If not admin, they must wait in the pending list
+      if (!isActuallyAdmin) {
+        console.log(` ${displayName} knocking for room: ${roomKey}`);
+        activeRoom.pendingUsers.set(socket.id, {
+          username: displayName,
+          socketId: socket.id,
+        });
+
+        // Notify existing users (the admin) that someone is knocking
+        io.to(roomKey).emit('room-knock', {
+          username: displayName,
+          socketId: socket.id,
+        });
+
+        socket.emit('waiting-approval', { message: 'Waiting for admin to grant permission...' });
+        return;
+      }
+
       for (const u of activeRoom.users.values()) {
         if (u.username.toLowerCase() === displayName.toLowerCase()) {
           socket.emit('join-rejected', {
@@ -600,7 +622,7 @@ io.on('connection', (socket) => {
         }
       }
 
-      console.log(` ${displayName} joining room: ${roomKey}`);
+      console.log(` Admin ${displayName} joining room: ${roomKey}`);
       socket.join(roomKey);
 
       activeRoom.users.set(socket.id, {
@@ -613,7 +635,7 @@ io.on('connection', (socket) => {
         language: room.language,
         users: Array.from(activeRoom.users.values()),
         chatHistory: room.chatHistory,
-        isAdmin: displayName === room.adminUsername,
+        isAdmin: true,
         requiresAdminToken: !!room.adminTokenHash,
       };
       if (isNewRoom && adminTokenPlain) {
@@ -630,6 +652,60 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Error joining room:', error);
       socket.emit('error', { message: 'Failed to join room' });
+    }
+  });
+
+  socket.on('approve-join', async ({ roomId, targetSocketId }) => {
+    try {
+      const roomKey = String(roomId || '').trim().toUpperCase();
+      const activeRoom = activeRooms.get(roomKey);
+      if (!activeRoom || !activeRoom.pendingUsers.has(targetSocketId)) return;
+
+      const user = activeRoom.pendingUsers.get(targetSocketId);
+      activeRoom.pendingUsers.delete(targetSocketId);
+
+      const targetSocket = io.sockets.sockets.get(targetSocketId);
+      if (!targetSocket) return;
+
+      const room = await Room.findOne({ roomId: roomKey });
+      if (!room) return;
+
+      targetSocket.join(roomKey);
+      activeRoom.users.set(targetSocketId, {
+        username: user.username,
+        socketId: targetSocketId,
+      });
+
+      const roomState = {
+        files: room.files,
+        language: room.language,
+        users: Array.from(activeRoom.users.values()),
+        chatHistory: room.chatHistory,
+        isAdmin: false,
+        requiresAdminToken: !!room.adminTokenHash,
+      };
+
+      targetSocket.emit('room-state', roomState);
+
+      io.to(roomKey).emit('user-joined', {
+        username: user.username,
+        socketId: targetSocketId,
+        users: Array.from(activeRoom.users.values()),
+      });
+    } catch (error) {
+      console.error('Error approving join:', error);
+    }
+  });
+
+  socket.on('reject-join', ({ roomId, targetSocketId }) => {
+    const roomKey = String(roomId || '').trim().toUpperCase();
+    const activeRoom = activeRooms.get(roomKey);
+    if (!activeRoom || !activeRoom.pendingUsers.has(targetSocketId)) return;
+
+    activeRoom.pendingUsers.delete(targetSocketId);
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (targetSocket) {
+      targetSocket.emit('join-rejected', { message: 'Admin declined your request to join.' });
     }
   });
 
@@ -748,7 +824,12 @@ socket.on('leave-video-call', ({ roomId }) => {
         
         io.to(roomId).emit('user-left-video', { userId: socket.id });
         
-        if (activeRoom.users.size === 0) {
+        if (activeRoom.users.size === 0 && activeRoom.pendingUsers.size === 0) {
+          activeRooms.delete(roomId);
+        }
+      } else if (activeRoom.pendingUsers.has(socket.id)) {
+        activeRoom.pendingUsers.delete(socket.id);
+        if (activeRoom.users.size === 0 && activeRoom.pendingUsers.size === 0) {
           activeRooms.delete(roomId);
         }
       }
